@@ -40,7 +40,7 @@ parse_time_column <- function(col_data) {
   # Try different datetime formats
   parsed_time <- tryCatch({
     # First try ISO format with timezone
-    as.POSIXct(col_data, format = "%Y-%m-%d %H:%M:%OS", tz = "UTC")
+    as.POSIXct(col_data, format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
   }, error = function(e) {
     tryCatch({
       # Try without timezone info
@@ -55,8 +55,9 @@ parse_time_column <- function(col_data) {
       })
     })
   })
-  
+  parsed_time<<-parsed_time
   return(parsed_time)
+  
 }
 
 #' Create relative time in seconds from start
@@ -68,14 +69,16 @@ parse_time_column <- function(col_data) {
 create_relative_time <- function(time_col) {
   if (inherits(time_col, "POSIXct")) {
     # Convert to seconds from the first timestamp
-    as.numeric(difftime(time_col, min(time_col, na.rm = TRUE), units = "secs"))
+    time_series<-as.numeric(difftime(time_col, min(time_col, na.rm = TRUE), units = "secs"))
   } else if (is.numeric(time_col)) {
     # If already numeric, assume it's in appropriate units
-    time_col - min(time_col, na.rm = TRUE)
+    time_series<-time_col - min(time_col, na.rm = TRUE)
   } else {
     # Fallback: create sequence
-    seq_along(time_col) - 1
+    time_series<-seq_along(time_col) - 1
   }
+  time_series<<-time_series
+  return(time_series)
 }
 
 #' Create plots for comparison
@@ -113,7 +116,7 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
     
     # Create custom breaks and labels for x-axis
     x_breaks <- pretty(x_limits, n = 8)
-    x_labels <- paste0(round(x_breaks, 1), "s")
+    x_labels <- round(x_breaks, 1)
     
     if (plot_style == "combined") {
       # Create combined data frame with safe column names
@@ -136,28 +139,27 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
       combined_data <- combined_data[!is.na(combined_data$time_x) & !is.na(combined_data$value_y), ]
       
       combined_plot <- ggplot(combined_data, aes(x = time_x, y = value_y, color = Condition)) +
-        geom_line(size = 0.8) +
-        geom_point(size = 1.5, alpha = 0.6) +
+        geom_line(size = 0.5) +
+        geom_point(size = 1, alpha = 0.5) +
         labs(title = paste0(var, " — ", label1, " vs ", label2), 
              x = "Time (seconds)", 
              y = var) +
         scale_y_continuous(limits = y_limits) +
         scale_x_continuous(limits = x_limits, breaks = x_breaks, labels = x_labels) +
-        scale_color_manual(values = c("blue", "red")) +
+        scale_color_manual(values = c("#008080", "#FF7F50")) +
         theme_minimal() +
         theme(plot.title = element_text(size = 14, face = "bold"),
               panel.grid.minor = element_blank(),
+              legend.title = element_blank(),
               text = element_text(family = "sans"),
-              axis.text.x = element_text(angle = 45, hjust = 1),
               legend.position = "bottom")
-      
       list(combined = combined_plot)
       
     } else {
       # Create separate plots
       p1 <- ggplot(d1, aes(x = .data[["time_relative"]], y = .data[[var]])) +
-        geom_line(color = "blue", size = 0.8) +
-        geom_point(color = "blue", size = 1.5, alpha = 0.6) +
+        geom_line(color = "#008080", size = 0.5) +
+        geom_point(color = "#008080", size = 1, alpha = 0.5) +
         labs(title = paste0(var, " — ", label1), 
              x = "Time (seconds)", 
              y = var) +
@@ -166,12 +168,11 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
         theme_minimal() +
         theme(plot.title = element_text(size = 14, face = "bold"),
               panel.grid.minor = element_blank(),
-              text = element_text(family = "sans"),
-              axis.text.x = element_text(angle = 45, hjust = 1))
+              text = element_text(family = "sans"))
       
       p2 <- ggplot(d2, aes(x = .data[["time_relative"]], y = .data[[var]])) +
-        geom_line(color = "red", size = 0.8) +
-        geom_point(color = "red", size = 1.5, alpha = 0.6) +
+        geom_line(color = "#FF7F50", size = 0.5) +
+        geom_point(color = "#FF7F50", size = 1, alpha = 0.5) +
         labs(title = paste0(var, " — ", label2), 
              x = "Time (seconds)", 
              y = var) +
@@ -180,8 +181,7 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
         theme_minimal() +
         theme(plot.title = element_text(size = 14, face = "bold"),
               panel.grid.minor = element_blank(),
-              text = element_text(family = "sans"),
-              axis.text.x = element_text(angle = 45, hjust = 1))
+              text = element_text(family = "sans"))
       
       list(left = p1, right = p2)
     }
