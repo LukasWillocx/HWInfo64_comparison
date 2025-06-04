@@ -77,7 +77,6 @@ create_relative_time <- function(time_col) {
     # Fallback: create sequence
     time_series<-seq_along(time_col) - 1
   }
-  time_series<<-time_series
   return(time_series)
 }
 
