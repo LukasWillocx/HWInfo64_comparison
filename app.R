@@ -1,10 +1,12 @@
 library(shiny)
-library(shinydashboard)
-library(ggplot2)
+library(shinydashboard) # layout 
+library(ggplot2) # plotting
 library(gridExtra)
-library(lubridate)  # Added for better datetime handling
+library(lubridate)  # datetime handling
 
-# UI with dashboard styling
+# Load custom functions
+source("app_functions.R")
+
 ui <- dashboardPage(
   dashboardHeader(title = "HWInfo64 Log Comparison"),
   
@@ -17,13 +19,8 @@ ui <- dashboardPage(
   ),
   
   dashboardBody(
-    tags$head(
-      tags$style(HTML("
-        .content-wrapper, .right-side { background-color: #f8f9fa; }
-        .box { border-radius: 8px; }
-        .btn { border-radius: 4px; }
-      "))
-    ),
+    # Include external CSS file
+    includeCSS("app_styles.css"),
     
     tabItems(
       # Data Upload Tab
@@ -32,12 +29,10 @@ ui <- dashboardPage(
                 box(title = "Upload CSV Files", status = "primary", solidHeader = TRUE, width = 12,
                     fluidRow(
                       column(6,
-                             h4("Condition 1"),
                              fileInput("csv1", "Upload CSV - Condition 1", accept = ".csv"),
                              textInput("label1", "Label for Condition 1", value = "Condition 1", placeholder = "e.g., Baseline")
                       ),
                       column(6,
-                             h4("Condition 2"),
                              fileInput("csv2", "Upload CSV - Condition 2", accept = ".csv"),
                              textInput("label2", "Label for Condition 2", value = "Condition 2", placeholder = "e.g., Modified")
                       )
@@ -148,20 +143,7 @@ server <- function(input, output, session) {
     plots_generated = FALSE
   )
   
-  # Clean CSV, remove footer, handle encoding, deduplicate (unchanged logic)
-  load_csv <- function(file) {
-    if (is.null(file)) return(NULL)
-    df <- tryCatch({
-      read.csv(file$datapath, fileEncoding = "latin1", stringsAsFactors = FALSE, check.names = FALSE)
-    }, error = function(e) {
-      message("CSV read error: ", e$message)
-      return(NULL)
-    })
-    if (nrow(df) < 3) return(NULL)
-    df <- df[1:(nrow(df)-2), , drop = FALSE]
-    df <- df[ , !duplicated(names(df))]
-    return(df)
-  }
+  # Functions are now loaded from app_functions.R
   
   df1 <- reactive(load_csv(input$csv1))
   df2 <- reactive(load_csv(input$csv2))
@@ -189,42 +171,7 @@ server <- function(input, output, session) {
     showNotification("Setup confirmed! You can now proceed to visualization.", type = "message")
   })
   
-  # Function to detect and parse time columns
-  parse_time_column <- function(col_data) {
-    # Try different datetime formats
-    parsed_time <- tryCatch({
-      # First try ISO format with timezone
-      as.POSIXct(col_data, format = "%Y-%m-%d %H:%M:%OS", tz = "UTC")
-    }, error = function(e) {
-      tryCatch({
-        # Try without timezone info
-        as.POSIXct(col_data, format = "%Y-%m-%d %H:%M:%S")
-      }, error = function(e2) {
-        tryCatch({
-          # Try lubridate's flexible parsing
-          ymd_hms(col_data, quiet = TRUE)
-        }, error = function(e3) {
-          # If all else fails, try to parse as numeric (seconds since epoch)
-          as.numeric(col_data)
-        })
-      })
-    })
-    return(parsed_time)
-  }
-  
-  # Function to create relative time in seconds from start
-  create_relative_time <- function(time_col) {
-    if (inherits(time_col, "POSIXct")) {
-      # Convert to seconds from the first timestamp
-      as.numeric(difftime(time_col, min(time_col, na.rm = TRUE), units = "secs"))
-    } else if (is.numeric(time_col)) {
-      # If already numeric, assume it's in appropriate units
-      time_col - min(time_col, na.rm = TRUE)
-    } else {
-      # Fallback: create sequence
-      seq_along(time_col) - 1
-    }
-  }
+  # Functions are now loaded from app_functions.R
   
   safe_data <- reactive({
     req(df1(), df2(), input$time_var, input$y_vars)
@@ -250,110 +197,14 @@ server <- function(input, output, session) {
     list(df1 = df1_clean, df2 = df2_clean)
   })
   
-  # Function to create plots for a given style
-  create_plots <- function(plot_style) {
+  # Function to create plots for a given style - now uses external function
+  create_plots_wrapper <- function(plot_style) {
     req(safe_data(), input$time_var, input$y_vars, values$setup_confirmed)
-    time_var <- "time_relative"  # Use our processed relative time
-    y_vars <- input$y_vars
-    d1 <- safe_data()$df1
-    d2 <- safe_data()$df2
-    
-    lapply(y_vars, function(var) {
-      # Calculate shared axis limits
-      y1_vals <- d1[[var]][!is.na(d1[[var]])]
-      y2_vals <- d2[[var]][!is.na(d2[[var]])]
-      x1_vals <- d1[[time_var]][!is.na(d1[[time_var]])]
-      x2_vals <- d2[[time_var]][!is.na(d2[[time_var]])]
-      
-      # Y-axis: minimum at 0, maximum from both datasets
-      y_max <- max(c(y1_vals, y2_vals), na.rm = TRUE)
-      y_limits <- c(0, y_max * 1.05)  # Add 5% padding at top
-      
-      # X-axis: shared range from both datasets (now in seconds)
-      x_min <- min(c(x1_vals, x2_vals), na.rm = TRUE)
-      x_max <- max(c(x1_vals, x2_vals), na.rm = TRUE)
-      x_limits <- c(x_min, x_max)
-      
-      # Create custom breaks and labels for x-axis
-      x_breaks <- pretty(x_limits, n = 8)
-      x_labels <- paste0(round(x_breaks, 1), "s")
-      
-      if (plot_style == "combined") {
-        # Create combined data frame with safe column names
-        # Use standard column names to avoid special character issues
-        combined_data <- rbind(
-          data.frame(
-            time_x = d1[[time_var]], 
-            value_y = d1[[var]], 
-            Condition = input$label1, 
-            stringsAsFactors = FALSE
-          ),
-          data.frame(
-            time_x = d2[[time_var]], 
-            value_y = d2[[var]], 
-            Condition = input$label2, 
-            stringsAsFactors = FALSE
-          )
-        )
-        
-        # Remove NA values
-        combined_data <- combined_data[!is.na(combined_data$time_x) & !is.na(combined_data$value_y), ]
-        
-        combined_plot <- ggplot(combined_data, aes(x = time_x, y = value_y, color = Condition)) +
-          geom_line(size = 0.8) +
-          geom_point(size = 1.5, alpha = 0.6) +
-          labs(title = paste0(var, " — ", input$label1, " vs ", input$label2), 
-               x = "Time (seconds)", 
-               y = var) +
-          scale_y_continuous(limits = y_limits) +
-          scale_x_continuous(limits = x_limits, breaks = x_breaks, labels = x_labels) +
-          scale_color_manual(values = c("blue", "red")) +
-          theme_minimal() +
-          theme(plot.title = element_text(size = 14, face = "bold"),
-                panel.grid.minor = element_blank(),
-                text = element_text(family = "sans"),
-                axis.text.x = element_text(angle = 45, hjust = 1),
-                legend.position = "bottom")
-        
-        list(combined = combined_plot)
-        
-      } else {
-        # Create separate plots (original behavior)
-        p1 <- ggplot(d1, aes(x = .data[["time_relative"]], y = .data[[var]])) +
-          geom_line(color = "blue", size = 0.8) +
-          geom_point(color = "blue", size = 1.5, alpha = 0.6) +
-          labs(title = paste0(var, " — ", input$label1), 
-               x = "Time (seconds)", 
-               y = var) +
-          scale_y_continuous(limits = y_limits) +
-          scale_x_continuous(limits = x_limits, breaks = x_breaks, labels = x_labels) +
-          theme_minimal() +
-          theme(plot.title = element_text(size = 14, face = "bold"),
-                panel.grid.minor = element_blank(),
-                text = element_text(family = "sans"),
-                axis.text.x = element_text(angle = 45, hjust = 1))
-        
-        p2 <- ggplot(d2, aes(x = .data[["time_relative"]], y = .data[[var]])) +
-          geom_line(color = "red", size = 0.8) +
-          geom_point(color = "red", size = 1.5, alpha = 0.6) +
-          labs(title = paste0(var, " — ", input$label2), 
-               x = "Time (seconds)", 
-               y = var) +
-          scale_y_continuous(limits = y_limits) +
-          scale_x_continuous(limits = x_limits, breaks = x_breaks, labels = x_labels) +
-          theme_minimal() +
-          theme(plot.title = element_text(size = 14, face = "bold"),
-                panel.grid.minor = element_blank(),
-                text = element_text(family = "sans"),
-                axis.text.x = element_text(angle = 45, hjust = 1))
-        
-        list(left = p1, right = p2)
-      }
-    })
+    create_plots(plot_style, safe_data(), input$time_var, input$y_vars, input$label1, input$label2)
   }
   
   plot_pairs <- reactive({
-    create_plots(input$plot_style)
+    create_plots_wrapper(input$plot_style)
   })
   
   # Generate plots action
@@ -449,7 +300,7 @@ server <- function(input, output, session) {
     filename = function() paste0("hwinfo_report_", Sys.Date(), ".pdf"),
     content = function(file) {
       # Use the export plot style preference
-      export_plots <- create_plots(input$export_plot_style)
+      export_plots <- create_plots(input$export_plot_style, safe_data(), input$time_var, input$y_vars, input$label1, input$label2)
       req(export_plots, values$plots_generated)
       
       # Use a temporary file approach for better reliability

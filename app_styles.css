@@ -1,0 +1,13 @@
+/* Custom styles for HWInfo64 Log Comparison App */
+
+.content-wrapper, .right-side {
+  background-color: #f8f9fa;
+}
+
+.box {
+  border-radius: 8px;
+}
+
+.btn {
+  border-radius: 4px;
+}
