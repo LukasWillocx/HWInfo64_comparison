@@ -219,18 +219,18 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
                    alpha = 0.6, size = 0.5) +
         geom_hline(yintercept = avg2, color = "#FF7F50", linetype = "dashed", 
                    alpha = 0.6, size = 0.5) +
-        geom_label(data = data.frame(x=x_max*1,y=avg1,label=round(avg1,2)),
+        geom_label(data = data.frame(x=x_max*0.95,y=avg1,label=round(avg1,2)),
                   aes(x=x,y=y,label=label),
                   vjust=-0.2,
                   hjust=0,
                   color="#008080")+
-        geom_label(data = data.frame(x=x_max*0.96,y=avg2,label=round(avg2,2)),
+        geom_label(data = data.frame(x=x_max*0.87,y=avg2,label=round(avg2,2)),
                   aes(x=x,y=y,label=label),
                   vjust=-0.2,
                   hjust=0,
                   color="#FF7F50")+
         labs(title = paste0(var, " — ", label1, " vs ", label2), 
-             subtitle = if(sampling_info != "") paste0("High-resolution data", sampling_info) else NULL,
+             subtitle = if(sampling_info != "") paste0(sampling_info) else NULL,
              x = "Time (seconds)", 
              y = var) +
         scale_y_continuous(limits = y_limits) +
@@ -239,8 +239,8 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
                            labels = time_axis$labels) +
         scale_color_manual(values = c("#008080", "#FF7F50")) +
         theme_minimal() +
-        theme(plot.title = element_text(size = 14, face = "bold"),
-              plot.subtitle = element_text(size = 10, color = "gray60"),
+        theme(plot.title = element_text(face = "bold"),
+              plot.subtitle = element_text(color = "gray60"),
               panel.grid.minor = element_blank(),
               legend.title = element_blank(),
               text = element_text(family = "sans"),
@@ -261,7 +261,7 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
                   vjust=-0.2,
                   color="#008080")+
         labs(title = paste0(var, " — ", label1), 
-             subtitle = if(sampling_info != "") paste0("High-resolution data", sampling_info) else NULL,
+             subtitle = if(sampling_info != "") paste0(sampling_info) else NULL,
              x = "Time (seconds)", 
              y = var) +
         scale_y_continuous(limits = y_limits) +
@@ -285,7 +285,7 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
                                     vjust=-0.2,
                                     color="#FF7F50")+
         labs(title = paste0(var, " — ", label2), 
-             subtitle = if(sampling_info != "") paste0("High-resolution data", sampling_info) else NULL,
+             subtitle = if(sampling_info != "") paste0(sampling_info) else NULL,
              x = "Time (seconds)", 
              y = var) +
         scale_y_continuous(limits = y_limits) +

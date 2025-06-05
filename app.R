@@ -95,29 +95,83 @@ ui <- dashboardPage(
               conditionalPanel(
                 condition = "output.plots_available",
                 fluidRow(
-                  box(title = "Export Options", status = "primary", solidHeader = TRUE, width = 6,
-                      h4("PDF Report Settings"),
-                      numericInput("pdf_width", "Width (inches):", value = 14, min = 5, max = 20, step = 0.5),
-                      numericInput("pdf_height", "Height per plot (inches):", value = 5, min = 3, max = 10, step = 0.5),
-                      br(),
-                      h4("Report Plot Style"),
-                      radioButtons("export_plot_style", "Export Plot Style:",
-                                   choices = list(
-                                     "Side-by-side (Separate)" = "separate",
-                                     "Combined (Overlay)" = "combined"
-                                   ),
-                                   selected = "separate"),
-                      br(),
-                      downloadButton("download_pdf", "Download PDF Report", class = "btn-success", icon = icon("file-pdf"))
+                  box(title = "Export Format", status = "primary", solidHeader = TRUE, width = 12,
+                      fluidRow(
+                        column(6,
+                               h4("Output Format"),
+                               radioButtons("export_format", "Choose Export Format:",
+                                            choices = list(
+                                              "PDF Report" = "pdf",
+                                              "PNG Images" = "png"
+                                            ),
+                                            selected = "pdf"),
+                               br(),
+                               h4("Plot Style for Export"),
+                               radioButtons("export_plot_style", "Export Plot Style:",
+                                            choices = list(
+                                              "Side-by-side (Separate)" = "separate",
+                                              "Combined (Overlay)" = "combined"
+                                            ),
+                                            selected = "separate")
+                        ),
+                        column(6,
+                               # Conditional panels for format-specific options
+                               conditionalPanel(
+                                 condition = "input.export_format == 'pdf'",
+                                 h4("PDF Settings"),
+                                 numericInput("pdf_width", "Width (inches):", value = 14, min = 5, max = 20, step = 0.5),
+                                 numericInput("pdf_height", "Height per plot (inches):", value = 5, min = 3, max = 10, step = 0.5)
+                               ),
+                               conditionalPanel(
+                                 condition = "input.export_format == 'png'",
+                                 h4("PNG Settings"),
+                                 numericInput("png_width", "Width (pixels):", value = 1920, min = 800, max = 4000, step = 100),
+                                 numericInput("png_height", "Height per plot (pixels):", value = 1080, min = 400, max = 3000, step = 50),
+                                 numericInput("png_dpi", "DPI (resolution):", value = 300, min = 72, max = 600, step = 50)
+                               )
+                        )
+                      )
+                  )
+                ),
+                fluidRow(
+                  box(title = "Download", status = "success", solidHeader = TRUE, width = 6,
+                      conditionalPanel(
+                        condition = "input.export_format == 'pdf'",
+                        downloadButton("download_pdf", "Download PDF Report", class = "btn-success", icon = icon("file-pdf"))
+                      ),
+                      conditionalPanel(
+                        condition = "input.export_format == 'png'",
+                        downloadButton("download_png", "Download PNG Images", class = "btn-success", icon = icon("image"))
+                      )
                   ),
                   
-                  box(title = "Report Preview", status = "info", solidHeader = TRUE, width = 6,
-                      h4("Your report will include:"),
-                      tags$ul(
-                        tags$li("Comparison plots in selected style"),
-                        tags$li("Condition labels and metadata"),
-                        tags$li("High-resolution plots"),
-                        tags$li("All selected variables")
+                  box(title = "Export Preview", status = "info", solidHeader = TRUE, width = 6,
+                      conditionalPanel(
+                        condition = "input.export_format == 'pdf'",
+                        h4("PDF Report will include:"),
+                        tags$ul(
+                          tags$li("Title page with metadata"),
+                          tags$li("Comparison plots in selected style"),
+                          tags$li("Condition labels and averages"),
+                          tags$li("High-resolution plots"),
+                          tags$li("All selected variables")
+                        )
+                      ),
+                      conditionalPanel(
+                        condition = "input.export_format == 'png'",
+                        h4("PNG Export will include:"),
+                        tags$ul(
+                          tags$li("Individual PNG files for each variable"),
+                          tags$li("High-resolution images at specified DPI"),
+                          tags$li("Files bundled in a ZIP archive"),
+                          tags$li("Plots in selected style (separate or combined)")
+                        ),
+                        br(),
+                        h5("File naming:"),
+                        tags$ul(
+                          tags$li(strong("Combined plots:"), " variable_name_combined.png"),
+                          tags$li(strong("Separate plots:"), " variable_name_condition1.png, variable_name_condition2.png")
+                        )
                       )
                   )
                 )
@@ -295,7 +349,7 @@ server <- function(input, output, session) {
   outputOptions(output, "setup_confirmed", suspendWhenHidden = FALSE)
   outputOptions(output, "plots_available", suspendWhenHidden = FALSE)
   
-  # PDF download
+  # PDF download handler (existing)
   output$download_pdf <- downloadHandler(
     filename = function() paste0("hwinfo_report_", Sys.Date(), ".pdf"),
     content = function(file) {
@@ -390,6 +444,99 @@ server <- function(input, output, session) {
       })
     },
     contentType = "application/pdf"
+  )
+  
+  # PNG download handler
+  output$download_png <- downloadHandler(
+    filename = function() paste0("hwinfo_plots_", Sys.Date(), ".zip"),
+    content = function(file) {
+      # Use the export plot style preference
+      export_plots <- create_plots(input$export_plot_style, safe_data(), input$time_var, input$y_vars, input$label1, input$label2)
+      req(export_plots, values$plots_generated)
+      
+      # Create temporary directory for PNG files
+      temp_dir <- tempdir()
+      png_files <- c()
+      
+      tryCatch({
+        # Create PNG files for each variable
+        for (i in seq_along(export_plots)) {
+          var_name <- make.names(input$y_vars[i])  # Clean variable name for filename
+          
+          if (input$export_plot_style == "combined") {
+            # Combined plot - single PNG per variable
+            png_file <- file.path(temp_dir, paste0(var_name, "_combined.png"))
+            
+            png(png_file, 
+                width = input$png_width, 
+                height = input$png_height, 
+                res = input$png_dpi)
+            
+            print(export_plots[[i]]$combined)
+            dev.off()
+            
+            png_files <- c(png_files, png_file)
+            
+          } else {
+            # Side-by-side plots - two PNGs per variable
+            png_file1 <- file.path(temp_dir, paste0(var_name, "_", make.names(input$label1), ".png"))
+            png_file2 <- file.path(temp_dir, paste0(var_name, "_", make.names(input$label2), ".png"))
+            
+            # First condition plot
+            png(png_file1, 
+                width = input$png_width, 
+                height = input$png_height, 
+                res = input$png_dpi)
+            
+            print(export_plots[[i]]$left)
+            dev.off()
+            
+            # Second condition plot
+            png(png_file2, 
+                width = input$png_width, 
+                height = input$png_height, 
+                res = input$png_dpi)
+            
+            print(export_plots[[i]]$right)
+            dev.off()
+            
+            png_files <- c(png_files, png_file1, png_file2)
+          }
+        }
+        
+        # Create ZIP file
+        zip_file <- tempfile(fileext = ".zip")
+        
+        # Change to temp directory and create zip
+        old_wd <- getwd()
+        setwd(temp_dir)
+        
+        # Get just the filenames for the zip
+        zip_filenames <- basename(png_files)
+        zip(zip_file, zip_filenames, flags = "-r9X")
+        
+        setwd(old_wd)
+        
+        # Copy the zip file to the final destination
+        file.copy(zip_file, file, overwrite = TRUE)
+        
+      }, error = function(e) {
+        # If there's an error, try to close any open devices
+        if (dev.cur() != 1) dev.off()
+        
+        # Create a simple error file
+        error_file <- tempfile(fileext = ".txt")
+        writeLines(paste("Error creating PNG files:", e$message), error_file)
+        file.copy(error_file, file, overwrite = TRUE)
+        
+      }, finally = {
+        # Clean up temporary PNG files
+        if (length(png_files) > 0) {
+          file.remove(png_files[file.exists(png_files)])
+        }
+      })
+    },
+    contentType = "application/zip"
   )
 }
 
