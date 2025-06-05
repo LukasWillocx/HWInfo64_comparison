@@ -17,6 +17,10 @@
   overflow: hidden !important;
 }
 
+#shiny-tab-upload > div > div > div > div.box-body {
+  padding-bottom:75px;
+}
+
 #shiny-tab-viz > div:nth-child(2) > div > div > div {
   overflow: hidden !important;
 }
