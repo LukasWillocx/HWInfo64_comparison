@@ -11,3 +11,24 @@
 .btn {
   border-radius: 4px;
 }
+
+/* Fix for the upload box corners */
+#shiny-tab-upload > div > div > div {
+  overflow: hidden !important;
+}
+
+#shiny-tab-viz > div:nth-child(2) > div > div > div {
+  overflow: hidden !important;
+}
+
+#shiny-tab-export > div:nth-child(2) > div > div > div {
+  overflow: hidden !important; 
+}
+
+#shiny-tab-export > div:nth-child(1) > div > div:nth-child(1) > div {
+  overflow: hidden !important; 
+}
+
+#shiny-tab-export > div:nth-child(1) > div > div:nth-child(2) > div {
+  overflow: hidden !important; 
+}
