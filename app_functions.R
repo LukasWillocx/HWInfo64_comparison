@@ -1,8 +1,7 @@
-# Custom functions for HWInfo64 Log Comparison App
-
 #' Load and clean CSV file
 #' 
-#' Loads a CSV file, handles encoding issues, removes footer rows, and deduplicates columns
+#' Loads a CSV file, handles encoding issues, removes footer rows, deduplicates columns,
+#' and converts "no"/"yes" values to 0/1
 #' 
 #' @param file File input object from Shiny fileInput
 #' @return Cleaned data frame or NULL if loading fails
@@ -17,13 +16,27 @@ load_csv <- function(file) {
     return(NULL)
   })
   
-  if (nrow(df) < 3) return(NULL)
+  if (is.null(df) || nrow(df) < 3) return(NULL)
   
   # Remove footer rows (last 2 rows typically contain summary info)
   df <- df[1:(nrow(df)-2), , drop = FALSE]
   
   # Remove duplicate columns
   df <- df[ , !duplicated(names(df))]
+  
+  # Convert "no"/"yes" to 0/1 in all character columns
+  char_cols <- sapply(df, is.character)
+  for (col in names(df)[char_cols]) {
+    # Convert "no" to 0 and "yes" to 1 (case insensitive)
+    df[[col]] <- ifelse(tolower(trimws(df[[col]])) == "no", 0,
+                        ifelse(tolower(trimws(df[[col]])) == "yes", 1, df[[col]]))
+    
+    # Try to convert to numeric if possible
+    num_version <- suppressWarnings(as.numeric(df[[col]]))
+    if (!all(is.na(num_version))) {
+      df[[col]] <- num_version
+    }
+  }
   
   return(df)
 }
@@ -90,24 +103,6 @@ create_relative_time <- function(time_col) {
   return(time_series)
 }
 
-#' Check if a variable is binary (0/1 values only)
-#' 
-#' Determines if a variable contains only binary values (0, 1, and potentially NA)
-#' 
-#' @param values Numeric vector to check
-#' @return Logical indicating if the variable is binary
-is_binary_variable <- function(values) {
-  # Remove NA values for checking
-  clean_values <- values[!is.na(values)]
-  
-  # If no valid values, assume not binary
-  if (length(clean_values) == 0) return(FALSE)
-  
-  # Check if all values are either 0 or 1
-  unique_values <- unique(clean_values)
-  all(unique_values %in% c(0, 1))
-}
-
 #' Create clean time axis breaks and labels
 #' 
 #' Creates appropriate time breaks with clean, round labels
@@ -170,25 +165,16 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
     x1_vals <- d1[[time_var]][!is.na(d1[[time_var]])]
     x2_vals <- d2[[time_var]][!is.na(d2[[time_var]])]
     
-    # Check if this is a binary variable
-    is_binary <- is_binary_variable(c(y1_vals, y2_vals))
-    
     # Calculate averages for display
     avg1 <- mean(y1_vals, na.rm = TRUE)
     avg2 <- mean(y2_vals, na.rm = TRUE)
     
-    # Y-axis limits: handle binary vs numeric differently
-    if (is_binary) {
-      y_limits <- c(-0.1, 1.1)  # Give some padding around 0 and 1
-    } else {
-      y_max <- max(c(y1_vals, y2_vals), na.rm = TRUE)
-      y_limits <- c(0, y_max * 1.05)  # Add 5% padding at top
-    }
-    
     # X-axis: shared range from both datasets with full precision
     x_min <- min(c(x1_vals, x2_vals), na.rm = TRUE)
     x_max <- max(c(x1_vals, x2_vals), na.rm = TRUE)
+    y_max <- max(c(y1_vals, y2_vals), na.rm = TRUE)
     x_limits <- c(x_min, x_max)
+    y_limits <- c(0, y_max * 1.05)
     
     # Detect sampling characteristics
     all_time_vals <- c(x1_vals, x2_vals)
@@ -233,12 +219,12 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
                    alpha = 0.6, size = 0.5) +
         geom_hline(yintercept = avg2, color = "#FF7F50", linetype = "dashed", 
                    alpha = 0.6, size = 0.5) +
-        geom_label(data = data.frame(x=x_max,y=avg1,label=round(avg1)),
+        geom_label(data = data.frame(x=x_max*1,y=avg1,label=round(avg1,2)),
                   aes(x=x,y=y,label=label),
                   vjust=-0.2,
                   hjust=0,
                   color="#008080")+
-        geom_label(data = data.frame(x=x_max*0.98,y=avg2,label=round(avg2)),
+        geom_label(data = data.frame(x=x_max*0.96,y=avg2,label=round(avg2,2)),
                   aes(x=x,y=y,label=label),
                   vjust=-0.2,
                   hjust=0,
@@ -246,9 +232,8 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
         labs(title = paste0(var, " — ", label1, " vs ", label2), 
              subtitle = if(sampling_info != "") paste0("High-resolution data", sampling_info) else NULL,
              x = "Time (seconds)", 
-             y = if(is_binary) paste0(var, " (0=No, 1=Yes)") else var) +
-        scale_y_continuous(limits = y_limits, 
-                           breaks = if(is_binary) c(0, 1) else waiver()) +
+             y = var) +
+        scale_y_continuous(limits = y_limits) +
         scale_x_continuous(limits = x_limits, 
                            breaks = time_axis$breaks, 
                            labels = time_axis$labels) +
@@ -271,17 +256,15 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
         # Add subtle average line
         geom_hline(yintercept = avg1, color = "#008080", linetype = "dashed", 
                    alpha = 0.6, size = 0.5) +
-        geom_text(data = data.frame(x=x_max,y=avg1,label=round(avg1)),
+        geom_label(data = data.frame(x=x_max*0.96,y=avg1,label=round(avg1,2)),
                   aes(x=x,y=y,label=label),
                   vjust=-0.2,
-                  hjust=0.05,
                   color="#008080")+
         labs(title = paste0(var, " — ", label1), 
              subtitle = if(sampling_info != "") paste0("High-resolution data", sampling_info) else NULL,
              x = "Time (seconds)", 
-             y = if(is_binary) paste0(var, " (0=No, 1=Yes)") else var) +
-        scale_y_continuous(limits = y_limits, 
-                           breaks = if(is_binary) c(0, 1) else waiver()) +
+             y = var) +
+        scale_y_continuous(limits = y_limits) +
         scale_x_continuous(limits = x_limits, 
                            breaks = time_axis$breaks, 
                            labels = time_axis$labels) +
@@ -297,17 +280,15 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
         # Add subtle average line
         geom_hline(yintercept = avg2, color = "#FF7F50", linetype = "dashed", 
                    alpha = 0.6, size = 0.5) +
-        geom_text(data = data.frame(x=x_max,y=avg2,label=round(avg2)),
+        geom_label(data = data.frame(x=x_max*0.96,y=avg2,label=round(avg2,2)),
                                     aes(x=x,y=y,label=label),
                                     vjust=-0.2,
-                                    hjust=0.05,
                                     color="#FF7F50")+
         labs(title = paste0(var, " — ", label2), 
              subtitle = if(sampling_info != "") paste0("High-resolution data", sampling_info) else NULL,
              x = "Time (seconds)", 
-             y = if(is_binary) paste0(var, " (0=No, 1=Yes)") else var) +
-        scale_y_continuous(limits = y_limits, 
-                           breaks = if(is_binary) c(0, 1) else waiver()) +
+             y = var) +
+        scale_y_continuous(limits = y_limits) +
         scale_x_continuous(limits = x_limits, 
                            breaks = time_axis$breaks, 
                            labels = time_axis$labels) +
