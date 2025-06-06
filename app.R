@@ -190,7 +190,7 @@ ui <- dashboardPage(
                                  h4("PNG Settings"),
                                  numericInput("png_width", "Width (pixels):", value = 1920, min = 800, max = 4000, step = 100),
                                  numericInput("png_height", "Height per plot (pixels):", value = 1080, min = 400, max = 3000, step = 50),
-                                 numericInput("png_dpi", "DPI (resolution):", value = 300, min = 72, max = 600, step = 50)
+                                 numericInput("png_dpi", "DPI (resolution):", value = 200, min = 72, max = 600, step = 50)
                                )
                         )
                       )
