@@ -8,7 +8,7 @@ library(lubridate)  # datetime handling
 source("app_functions.R")
 
 ui <- dashboardPage(
-  dashboardHeader(title = "HWInfo64 Log Comparison"),
+  dashboardHeader(title = "CSV comparison tool"),
   
   dashboardSidebar(
     sidebarMenu(
@@ -19,24 +19,66 @@ ui <- dashboardPage(
   ),
   
   dashboardBody(
-    # Include external CSS file
     includeCSS("app_styles.css"),
     
     tabItems(
-      # Data Upload Tab
       tabItem(tabName = "upload",
               fluidRow(
                 box(title = "Upload CSV Files", status = "primary", solidHeader = TRUE, width = 12,
+                    # Add option to choose between upload and test files
                     fluidRow(
-                      column(6,
-                             fileInput("csv1", "Upload CSV - Condition 1", accept = ".csv"),
-                             textInput("label1", "Label for Condition 1", value = "Condition 1", placeholder = "e.g., Baseline")
-                      ),
-                      column(6,
-                             fileInput("csv2", "Upload CSV - Condition 2", accept = ".csv"),
-                             textInput("label2", "Label for Condition 2", value = "Condition 2", placeholder = "e.g., Modified")
+                      column(12,
+                             radioButtons("data_source", "Data Source:",
+                                          choices = list(
+                                            "Upload your own CSV files" = "upload",
+                                            "Use demo test files" = "demo"
+                                          ),
+                                          selected = "demo"),
+                             hr()
                       )
                     ),
+                    
+                    # Conditional panels based on data source choice
+                    conditionalPanel(
+                      condition = "input.data_source == 'upload'",
+                      fluidRow(
+                        column(6,
+                               fileInput("csv1", "Upload CSV - Condition 1", accept = ".csv"),
+                               textInput("label1", "Label for Condition 1", value = "Condition 1", placeholder = "e.g., Baseline")
+                        ),
+                        column(6,
+                               fileInput("csv2", "Upload CSV - Condition 2", accept = ".csv"),
+                               textInput("label2", "Label for Condition 2", value = "Condition 2", placeholder = "e.g., Modified")
+                        )
+                      )
+                    ),
+                    
+                    conditionalPanel(
+                      condition = "input.data_source == 'demo'",
+                      fluidRow(
+                        column(6,
+                               selectInput("demo_csv1", "Choose Demo CSV - Condition 1", 
+                                           choices = list(
+                                             "High Performance Data" = "demo_high_perf.csv",
+                                             "Standard Performance Data" = "demo_standard_perf.csv",
+                                             "Temperature Test 1" = "demo_temp1.csv"
+                                           ),
+                                           selected = "demo_high_perf.csv"),
+                               textInput("demo_label1", "Label for Condition 1", value = "High Performance", placeholder = "e.g., Baseline")
+                        ),
+                        column(6,
+                               selectInput("demo_csv2", "Choose Demo CSV - Condition 2", 
+                                           choices = list(
+                                             "High Performance Data" = "demo_high_perf.csv",
+                                             "Standard Performance Data" = "demo_standard_perf.csv",
+                                             "Temperature Test 2" = "demo_temp2.csv"
+                                           ),
+                                           selected = "demo_standard_perf.csv"),
+                               textInput("demo_label2", "Label for Condition 2", value = "Standard Performance", placeholder = "e.g., Modified")
+                        )
+                      )
+                    ),
+                    
                     hr(),
                     conditionalPanel(
                       condition = "output.files_uploaded",
@@ -51,7 +93,6 @@ ui <- dashboardPage(
               )
       ),
       
-      # Visualization Tab
       tabItem(tabName = "viz",
               conditionalPanel(
                 condition = "output.setup_confirmed",
@@ -90,7 +131,6 @@ ui <- dashboardPage(
               )
       ),
       
-      # Export Tab
       tabItem(tabName = "export",
               conditionalPanel(
                 condition = "output.plots_available",
@@ -115,7 +155,7 @@ ui <- dashboardPage(
                                             selected = "separate")
                         ),
                         column(6,
-                               # Conditional panels for format-specific options
+                               # Conditional panels for format-specific options : PDF & PNG
                                conditionalPanel(
                                  condition = "input.export_format == 'pdf'",
                                  h4("PDF Settings"),
@@ -191,16 +231,57 @@ ui <- dashboardPage(
 )
 
 server <- function(input, output, session) {
-  # Reactive values to track state
+  # Reactive values to track state / progress (CSV submission & plotting)
   values <- reactiveValues(
     setup_confirmed = FALSE,
     plots_generated = FALSE
   )
   
-  # Functions are now loaded from app_functions.R
+  # Load CSV files based on data source
+  df1 <- reactive({
+    if (input$data_source == "upload") {
+      load_csv(input$csv1)
+    } else {
+      # Load demo file
+      if (!is.null(input$demo_csv1)) {
+        demo_file <- list(datapath = file.path("www", input$demo_csv1))
+        load_csv(demo_file)
+      } else {
+        NULL
+      }
+    }
+  })
   
-  df1 <- reactive(load_csv(input$csv1))
-  df2 <- reactive(load_csv(input$csv2))
+  df2 <- reactive({
+    if (input$data_source == "upload") {
+      load_csv(input$csv2)
+    } else {
+      # Load demo file
+      if (!is.null(input$demo_csv2)) {
+        demo_file <- list(datapath = file.path("www", input$demo_csv2))
+        load_csv(demo_file)
+      } else {
+        NULL
+      }
+    }
+  })
+  
+  # Get labels based on data source
+  current_label1 <- reactive({
+    if (input$data_source == "upload") {
+      input$label1
+    } else {
+      input$demo_label1
+    }
+  })
+  
+  current_label2 <- reactive({
+    if (input$data_source == "upload") {
+      input$label2
+    } else {
+      input$demo_label2
+    }
+  })
   
   shared_columns <- reactive({
     req(df1(), df2())
@@ -215,22 +296,45 @@ server <- function(input, output, session) {
   output$y_selector <- renderUI({
     req(shared_columns(), input$time_var)
     y_choices <- setdiff(shared_columns(), input$time_var)
-    selectInput("y_vars", "Y-Axis Variable(s) to Compare", choices = as.list(y_choices), multiple = TRUE, width = "100%")
+    div(
+      selectInput("y_vars", "Y-Axis Variable(s) to Compare", 
+                  choices = as.list(y_choices), 
+                  multiple = TRUE, 
+                  width = "100%"),
+      tags$small(class = "text-muted", 
+                 style = "color: #666; font-style: italic;",
+                 "Maximum 4 variables can be selected for comparison")
+    )
   })
   
-  # Setup confirmation
+  # Add validation for maximum 4 variables
+  observe({
+    if (!is.null(input$y_vars) && length(input$y_vars) > 4) {
+      # Keep only the first 4 selections
+      updateSelectInput(session, "y_vars", 
+                        selected = input$y_vars[1:4])
+      showNotification("Maximum 4 variables allowed. Selection limited to first 4 variables.", 
+                       type = "warning", duration = 3)
+    }
+  })
+  
   observeEvent(input$confirm_setup, {
     req(input$time_var, input$y_vars)
+    
+    # Additional validation check
+    if (length(input$y_vars) > 4) {
+      showNotification("Please select a maximum of 4 variables for comparison.", 
+                       type = "error", duration = 5)
+      return()
+    }
+    
     values$setup_confirmed <- TRUE
     showNotification("Setup confirmed! You can now proceed to visualization.", type = "message")
   })
   
-  # Functions are now loaded from app_functions.R
-  
   safe_data <- reactive({
     req(df1(), df2(), input$time_var, input$y_vars)
     
-    # Clean and ensure numeric Y variables
     df1_clean <- df1()
     df2_clean <- df2()
     
@@ -238,11 +342,10 @@ server <- function(input, output, session) {
     time_col1 <- parse_time_column(df1_clean[[input$time_var]])
     time_col2 <- parse_time_column(df2_clean[[input$time_var]])
     
-    # Convert to relative time in seconds
     df1_clean$time_relative <- create_relative_time(time_col1)
     df2_clean$time_relative <- create_relative_time(time_col2)
     
-    # Clean Y variables
+    # Clean Y variables (numeric values comma decimals to points)
     for (var in input$y_vars) {
       df1_clean[[var]] <- suppressWarnings(as.numeric(gsub(",", ".", df1_clean[[var]])))
       df2_clean[[var]] <- suppressWarnings(as.numeric(gsub(",", ".", df2_clean[[var]])))
@@ -251,17 +354,16 @@ server <- function(input, output, session) {
     list(df1 = df1_clean, df2 = df2_clean)
   })
   
-  # Function to create plots for a given style - now uses external function
+  # Function to create plots for a given style (side-by-side vs combined)
   create_plots_wrapper <- function(plot_style) {
     req(safe_data(), input$time_var, input$y_vars, values$setup_confirmed)
-    create_plots(plot_style, safe_data(), input$time_var, input$y_vars, input$label1, input$label2)
+    create_plots(plot_style, safe_data(), input$time_var, input$y_vars, current_label1(), current_label2())
   }
   
   plot_pairs <- reactive({
     create_plots_wrapper(input$plot_style)
   })
   
-  # Generate plots action
   observeEvent(input$generate_plots, {
     req(plot_pairs())
     values$plots_generated <- TRUE
@@ -272,7 +374,6 @@ server <- function(input, output, session) {
     req(plot_pairs(), values$plots_generated)
     
     if (input$plot_style == "combined") {
-      # Combined plot layout - one plot per variable
       tagList(
         lapply(seq_along(plot_pairs()), function(i) {
           div(
@@ -283,7 +384,6 @@ server <- function(input, output, session) {
         })
       )
     } else {
-      # Side-by-side plot layout
       tagList(
         lapply(seq_along(plot_pairs()), function(i) {
           div(
@@ -304,7 +404,6 @@ server <- function(input, output, session) {
     req(plots, values$plots_generated)
     
     if (input$plot_style == "combined") {
-      # Render combined plots
       for (i in seq_along(plots)) {
         local({
           idx <- i
@@ -312,7 +411,6 @@ server <- function(input, output, session) {
         })
       }
     } else {
-      # Render separate plots
       for (i in seq_along(plots)) {
         local({
           idx <- i
@@ -323,7 +421,7 @@ server <- function(input, output, session) {
     }
   })
   
-  # Selected variables display
+  # show which variables are on display
   output$selected_vars <- renderText({
     if (!is.null(input$y_vars) && length(input$y_vars) > 0) {
       paste(input$y_vars, collapse = "\n")
@@ -351,27 +449,26 @@ server <- function(input, output, session) {
   
   # PDF download handler (existing)
   output$download_pdf <- downloadHandler(
-    filename = function() paste0("hwinfo_report_", Sys.Date(), ".pdf"),
+    filename = function() paste0("csv_report_", Sys.Date(), ".pdf"),
     content = function(file) {
       # Use the export plot style preference
-      export_plots <- create_plots(input$export_plot_style, safe_data(), input$time_var, input$y_vars, input$label1, input$label2)
+      export_plots <- create_plots(input$export_plot_style, safe_data(), input$time_var, input$y_vars, current_label1(), current_label2())
       req(export_plots, values$plots_generated)
       
-      # Use a temporary file approach for better reliability
       temp_file <- tempfile(fileext = ".pdf")
       
       tryCatch({
         # Open PDF device
         pdf(temp_file, width = input$pdf_width, height = input$pdf_height, onefile = TRUE)
         
-        # Title page using base R graphics
+        # Title page generation using base R graphics
         par(mar = c(0, 0, 0, 0))
         plot.new()
-        text(0.5, 0.8, "HWInfo64 Log Comparison Report", 
+        text(0.5, 0.8, "CSV Comparison Report", 
              cex = 2.5, font = 2, adj = 0.5)
         text(0.5, 0.65, paste("Generated on:", Sys.Date()), 
              cex = 1.4, adj = 0.5)
-        text(0.5, 0.55, paste("Conditions:", input$label1, "vs", input$label2), 
+        text(0.5, 0.55, paste("Conditions:", current_label1(), "vs", current_label2()), 
              cex = 1.6, font = 2, adj = 0.5)
         text(0.5, 0.45, paste("Variables compared:", length(input$y_vars)), 
              cex = 1.2, adj = 0.5)
@@ -414,9 +511,9 @@ server <- function(input, output, session) {
         # Title page
         par(mar = c(0, 0, 0, 0))
         plot.new()
-        title(main = "HWInfo64 Log Comparison Report", cex.main = 2.5, line = -2)
+        title(main = "CSV Comparison Report", cex.main = 2.5, line = -2)
         mtext(paste("Generated:", Sys.Date()), side = 1, line = -8, cex = 1.4)
-        mtext(paste("Conditions:", input$label1, "vs", input$label2), side = 1, line = -6, cex = 1.6)
+        mtext(paste("Conditions:", current_label1(), "vs", current_label2()), side = 1, line = -6, cex = 1.6)
         
         # Plot each variable
         for (i in seq_along(export_plots)) {
@@ -448,10 +545,10 @@ server <- function(input, output, session) {
   
   # PNG download handler
   output$download_png <- downloadHandler(
-    filename = function() paste0("hwinfo_plots_", Sys.Date(), ".zip"),
+    filename = function() paste0("CSV_plots_", Sys.Date(), ".zip"),
     content = function(file) {
       # Use the export plot style preference
-      export_plots <- create_plots(input$export_plot_style, safe_data(), input$time_var, input$y_vars, input$label1, input$label2)
+      export_plots <- create_plots(input$export_plot_style, safe_data(), input$time_var, input$y_vars, current_label1(), current_label2())
       req(export_plots, values$plots_generated)
       
       # Create temporary directory for PNG files
@@ -479,8 +576,8 @@ server <- function(input, output, session) {
             
           } else {
             # Side-by-side plots - two PNGs per variable
-            png_file1 <- file.path(temp_dir, paste0(var_name, "_", make.names(input$label1), ".png"))
-            png_file2 <- file.path(temp_dir, paste0(var_name, "_", make.names(input$label2), ".png"))
+            png_file1 <- file.path(temp_dir, paste0(var_name, "_", make.names(current_label1()), ".png"))
+            png_file2 <- file.path(temp_dir, paste0(var_name, "_", make.names(current_label2()), ".png"))
             
             # First condition plot
             png(png_file1, 
