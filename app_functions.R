@@ -211,7 +211,8 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
       # Remove NA values
       combined_data <- combined_data[!is.na(combined_data$time_x) & !is.na(combined_data$value_y), ]
       
-      combined_plot <- ggplot(combined_data, aes(x = time_x, y = value_y, color = Condition)) +
+      combined_plot <- ggplot(combined_data, aes(x = time_x, y = value_y, color = factor(Condition,
+                                                                                         levels=c(label1,label2)))) +
         geom_line(size = 0.5, alpha = 0.8) +
         geom_point(size = 0.8, alpha = 0.4) +
         # Add subtle average lines
