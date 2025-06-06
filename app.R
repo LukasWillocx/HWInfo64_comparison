@@ -9,12 +9,11 @@ source("app_functions.R")
 
 # Function to get all CSV files from www folder and create friendly names
 get_demo_files <- function() {
-  www_path <- "www"
-  if (!dir.exists(www_path)) {
+  if (!dir.exists('www')) {
     return(list())
   }
   
-  csv_files <- list.files(www_path, pattern = "\\.csv$", full.names = FALSE)
+  csv_files <- list.files(path= 'www',pattern ="\\.CSV$", full.names = FALSE)
   
   if (length(csv_files) == 0) {
     return(list())
