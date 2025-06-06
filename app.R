@@ -7,6 +7,32 @@ library(lubridate)  # datetime handling
 # Load custom functions
 source("app_functions.R")
 
+# Function to get all CSV files from www folder and create friendly names
+get_demo_files <- function() {
+  www_path <- "www"
+  if (!dir.exists(www_path)) {
+    return(list())
+  }
+  
+  csv_files <- list.files(www_path, pattern = "\\.csv$", full.names = FALSE)
+  
+  if (length(csv_files) == 0) {
+    return(list())
+  }
+  
+  # Create friendly names by removing prefixes and file extensions
+  friendly_names <- gsub("^demo_", "", csv_files)
+  friendly_names <- gsub("\\.csv$", "", friendly_names)
+  friendly_names <- gsub("_", " ", friendly_names)
+  friendly_names <- tools::toTitleCase(friendly_names)
+  
+  # Create named list for selectInput
+  demo_choices <- as.list(csv_files)
+  names(demo_choices) <- friendly_names
+  
+  return(demo_choices)
+}
+
 ui <- dashboardPage(
   dashboardHeader(title = "CSV comparison tool"),
   
@@ -57,24 +83,22 @@ ui <- dashboardPage(
                       condition = "input.data_source == 'demo'",
                       fluidRow(
                         column(6,
-                               selectInput("demo_csv1", "Choose Demo CSV - Condition 1", 
-                                           choices = list(
-                                             "High Performance Data" = "demo_high_perf.csv",
-                                             "Standard Performance Data" = "demo_standard_perf.csv",
-                                             "Temperature Test 1" = "demo_temp1.csv"
-                                           ),
-                                           selected = "demo_high_perf.csv"),
-                               textInput("demo_label1", "Label for Condition 1", value = "High Performance", placeholder = "e.g., Baseline")
+                               h4("Condition 1"),
+                               uiOutput("demo_csv1_selector"),
+                               textInput("demo_label1", "Label for Condition 1", value = "Condition 1", placeholder = "e.g., Baseline")
                         ),
                         column(6,
-                               selectInput("demo_csv2", "Choose Demo CSV - Condition 2", 
-                                           choices = list(
-                                             "High Performance Data" = "demo_high_perf.csv",
-                                             "Standard Performance Data" = "demo_standard_perf.csv",
-                                             "Temperature Test 2" = "demo_temp2.csv"
-                                           ),
-                                           selected = "demo_standard_perf.csv"),
-                               textInput("demo_label2", "Label for Condition 2", value = "Standard Performance", placeholder = "e.g., Modified")
+                               h4("Condition 2"),
+                               uiOutput("demo_csv2_selector"),
+                               textInput("demo_label2", "Label for Condition 2", value = "Condition 2", placeholder = "e.g., Modified")
+                        )
+                      ),
+                      fluidRow(
+                        column(12,
+                               div(style = "margin-top: 15px; padding: 10px; background-color: #f0f8ff; border-left: 4px solid #2196F3; border-radius: 4px;",
+                                   h5(style = "margin-top: 0; color: #1976D2;", icon("info-circle"), " Available Demo Files"),
+                                   uiOutput("demo_files_info")
+                               )
                         )
                       )
                     ),
@@ -231,11 +255,85 @@ ui <- dashboardPage(
 )
 
 server <- function(input, output, session) {
+  # Get available demo files
+  demo_files <- get_demo_files()
+  
   # Reactive values to track state / progress (CSV submission & plotting)
   values <- reactiveValues(
     setup_confirmed = FALSE,
     plots_generated = FALSE
   )
+  
+  # Render demo file selectors
+  output$demo_csv1_selector <- renderUI({
+    if (length(demo_files) == 0) {
+      div(
+        style = "color: #d9534f; padding: 10px; border: 1px solid #d9534f; border-radius: 4px;",
+        icon("exclamation-triangle"),
+        " No demo CSV files found in www folder"
+      )
+    } else {
+      selectInput("demo_csv1", "Choose Demo CSV File:", 
+                  choices = demo_files,
+                  selected = demo_files[[1]])
+    }
+  })
+  
+  output$demo_csv2_selector <- renderUI({
+    if (length(demo_files) == 0) {
+      div(
+        style = "color: #d9534f; padding: 10px; border: 1px solid #d9534f; border-radius: 4px;",
+        icon("exclamation-triangle"),
+        " No demo CSV files found in www folder"
+      )
+    } else {
+      # Set default to second file if available, otherwise first file
+      default_selection <- if(length(demo_files) > 1) demo_files[[2]] else demo_files[[1]]
+      
+      selectInput("demo_csv2", "Choose Demo CSV File:", 
+                  choices = demo_files,
+                  selected = default_selection)
+    }
+  })
+  
+  # Display information about available demo files
+  output$demo_files_info <- renderUI({
+    if (length(demo_files) == 0) {
+      p("No demo files available. Please add CSV files to the www folder.")
+    } else {
+      div(
+        p(paste("Found", length(demo_files), "demo files:")),
+        tags$ul(
+          lapply(names(demo_files), function(name) {
+            tags$li(strong(name), " (", demo_files[[name]], ")")
+          })
+        ),
+        p(style = "margin-bottom: 0; font-size: 0.9em; color: #666;", 
+          "Select any two files to compare their data.")
+      )
+    }
+  })
+  
+  # Update labels when demo files change
+  observe({
+    if (input$data_source == "demo" && !is.null(input$demo_csv1)) {
+      # Extract friendly name for auto-labeling
+      friendly_name1 <- names(demo_files)[demo_files == input$demo_csv1]
+      if (length(friendly_name1) > 0) {
+        updateTextInput(session, "demo_label1", value = friendly_name1)
+      }
+    }
+  })
+  
+  observe({
+    if (input$data_source == "demo" && !is.null(input$demo_csv2)) {
+      # Extract friendly name for auto-labeling
+      friendly_name2 <- names(demo_files)[demo_files == input$demo_csv2]
+      if (length(friendly_name2) > 0) {
+        updateTextInput(session, "demo_label2", value = friendly_name2)
+      }
+    }
+  })
   
   # Load CSV files based on data source
   df1 <- reactive({
@@ -243,7 +341,7 @@ server <- function(input, output, session) {
       load_csv(input$csv1)
     } else {
       # Load demo file
-      if (!is.null(input$demo_csv1)) {
+      if (!is.null(input$demo_csv1) && length(demo_files) > 0) {
         demo_file <- list(datapath = file.path("www", input$demo_csv1))
         load_csv(demo_file)
       } else {
@@ -257,7 +355,7 @@ server <- function(input, output, session) {
       load_csv(input$csv2)
     } else {
       # Load demo file
-      if (!is.null(input$demo_csv2)) {
+      if (!is.null(input$demo_csv2) && length(demo_files) > 0) {
         demo_file <- list(datapath = file.path("www", input$demo_csv2))
         load_csv(demo_file)
       } else {
