@@ -157,8 +157,8 @@ ui <- dashboardPage(
                                conditionalPanel(
                                  condition = "input.export_format == 'pdf'",
                                  h4("PDF Settings"),
-                                 numericInput("pdf_width", "Width (inches):", value = 14, min = 5, max = 20, step = 0.5),
-                                 numericInput("pdf_height", "Height per plot (inches):", value = 5, min = 3, max = 10, step = 0.5)
+                                 numericInput("pdf_width", "Width (inches):", value = 16, min = 5, max = 20, step = 0.5),
+                                 numericInput("pdf_height", "Height per plot (inches):", value = 9, min = 3, max = 10, step = 0.5)
                                ),
                                conditionalPanel(
                                  condition = "input.export_format == 'png'",
