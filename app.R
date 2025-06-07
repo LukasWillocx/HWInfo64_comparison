@@ -7,31 +7,6 @@ library(lubridate)  # datetime handling
 # Load custom functions
 source("app_functions.R")
 
-# Function to get all CSV files from www folder and create friendly names
-get_demo_files <- function() {
-  if (!dir.exists('www')) {
-    return(list())
-  }
-  
-  csv_files <- list.files(path= 'www',pattern ="\\.CSV$", full.names = FALSE)
-  
-  if (length(csv_files) == 0) {
-    return(list())
-  }
-  
-  # Create friendly names by removing prefixes and file extensions
-  friendly_names <- gsub("^demo_", "", csv_files)
-  friendly_names <- gsub("\\.csv$", "", friendly_names)
-  friendly_names <- gsub("_", " ", friendly_names)
-  friendly_names <- tools::toTitleCase(friendly_names)
-  
-  # Create named list for selectInput
-  demo_choices <- as.list(csv_files)
-  names(demo_choices) <- friendly_names
-  
-  return(demo_choices)
-}
-
 ui <- dashboardPage(
   dashboardHeader(title = "CSV comparison tool"),
   
@@ -260,8 +235,20 @@ server <- function(input, output, session) {
   # Reactive values to track state / progress (CSV submission & plotting)
   values <- reactiveValues(
     setup_confirmed = FALSE,
-    plots_generated = FALSE
+    plots_generated = FALSE,
+    data_source_changed = FALSE
   )
+  
+  # Reset state when data source changes
+  observeEvent(input$data_source, {
+    values$setup_confirmed <- FALSE
+    values$plots_generated <- FALSE
+    values$data_source_changed <- TRUE
+    
+    # Clear variable selections
+    updateSelectInput(session, "time_var", selected = character(0))
+    updateSelectInput(session, "y_vars", selected = character(0))
+  }, ignoreInit = TRUE)
   
   # Render demo file selectors
   output$demo_csv1_selector <- renderUI({
@@ -334,69 +321,93 @@ server <- function(input, output, session) {
     }
   })
   
-  # Load CSV files based on data source
+  # Load CSV files based on data source with error handling
   df1 <- reactive({
-    if (input$data_source == "upload") {
-      load_csv(input$csv1)
-    } else {
-      # Load demo file
-      if (!is.null(input$demo_csv1) && length(demo_files) > 0) {
-        demo_file <- list(datapath = file.path("www", input$demo_csv1))
-        load_csv(demo_file)
+    tryCatch({
+      if (input$data_source == "upload") {
+        if (is.null(input$csv1)) return(NULL)
+        load_csv(input$csv1)
       } else {
-        NULL
+        # Load demo file
+        if (!is.null(input$demo_csv1) && length(demo_files) > 0) {
+          demo_file <- list(datapath = file.path("www", input$demo_csv1))
+          load_csv(demo_file)
+        } else {
+          NULL
+        }
       }
-    }
+    }, error = function(e) {
+      showNotification(paste("Error loading CSV 1:", e$message), type = "error")
+      return(NULL)
+    })
   })
   
   df2 <- reactive({
-    if (input$data_source == "upload") {
-      load_csv(input$csv2)
-    } else {
-      # Load demo file
-      if (!is.null(input$demo_csv2) && length(demo_files) > 0) {
-        demo_file <- list(datapath = file.path("www", input$demo_csv2))
-        load_csv(demo_file)
+    tryCatch({
+      if (input$data_source == "upload") {
+        if (is.null(input$csv2)) return(NULL)
+        load_csv(input$csv2)
       } else {
-        NULL
+        # Load demo file
+        if (!is.null(input$demo_csv2) && length(demo_files) > 0) {
+          demo_file <- list(datapath = file.path("www", input$demo_csv2))
+          load_csv(demo_file)
+        } else {
+          NULL
+        }
       }
-    }
+    }, error = function(e) {
+      showNotification(paste("Error loading CSV 2:", e$message), type = "error")
+      return(NULL)
+    })
   })
   
   # Get labels based on data source
   current_label1 <- reactive({
     if (input$data_source == "upload") {
-      input$label1
+      if (is.null(input$label1) || input$label1 == "") "Condition 1" else input$label1
     } else {
-      input$demo_label1
+      if (is.null(input$demo_label1) || input$demo_label1 == "") "Condition 1" else input$demo_label1
     }
   })
   
   current_label2 <- reactive({
     if (input$data_source == "upload") {
-      input$label2
+      if (is.null(input$label2) || input$label2 == "") "Condition 2" else input$label2
     } else {
-      input$demo_label2
+      if (is.null(input$demo_label2) || input$demo_label2 == "") "Condition 2" else input$demo_label2
     }
   })
   
   shared_columns <- reactive({
     req(df1(), df2())
-    intersect(names(df1()), names(df2()))
+    tryCatch({
+      intersect(names(df1()), names(df2()))
+    }, error = function(e) {
+      character(0)
+    })
   })
   
   output$time_selector <- renderUI({
-    req(shared_columns())
-    selectInput("time_var", "Time Variable (X-axis)", choices = shared_columns(), width = "300px")
+    columns <- shared_columns()
+    if (length(columns) == 0) return(NULL)
+    
+    selectInput("time_var", "Time Variable (X-axis)", 
+                choices = columns, 
+                selected = NULL,
+                width = "300px")
   })
   
   output$y_selector <- renderUI({
     req(shared_columns(), input$time_var)
     y_choices <- setdiff(shared_columns(), input$time_var)
+    if (length(y_choices) == 0) return(NULL)
+    
     div(
       selectInput("y_vars", "Y-Axis Variable(s) to Compare", 
                   choices = as.list(y_choices), 
                   multiple = TRUE, 
+                  selected = NULL,
                   width = "100%"),
       tags$small(class = "text-muted", 
                  style = "color: #666; font-style: italic;",
@@ -426,35 +437,57 @@ server <- function(input, output, session) {
     }
     
     values$setup_confirmed <- TRUE
+    values$plots_generated <- FALSE  # Reset plots when setup changes
     showNotification("Setup confirmed! You can now proceed to visualization.", type = "message")
   })
   
   safe_data <- reactive({
-    req(df1(), df2(), input$time_var, input$y_vars)
+    req(df1(), df2(), input$time_var, input$y_vars, values$setup_confirmed)
     
-    df1_clean <- df1()
-    df2_clean <- df2()
-    
-    # Handle time variable - parse and convert to relative seconds
-    time_col1 <- parse_time_column(df1_clean[[input$time_var]])
-    time_col2 <- parse_time_column(df2_clean[[input$time_var]])
-    
-    df1_clean$time_relative <- create_relative_time(time_col1)
-    df2_clean$time_relative <- create_relative_time(time_col2)
-    
-    # Clean Y variables (numeric values comma decimals to points)
-    for (var in input$y_vars) {
-      df1_clean[[var]] <- suppressWarnings(as.numeric(gsub(",", ".", df1_clean[[var]])))
-      df2_clean[[var]] <- suppressWarnings(as.numeric(gsub(",", ".", df2_clean[[var]])))
-    }
-    
-    list(df1 = df1_clean, df2 = df2_clean)
+    tryCatch({
+      df1_clean <- df1()
+      df2_clean <- df2()
+      
+      # Validate that required columns exist
+      if (!input$time_var %in% names(df1_clean) || !input$time_var %in% names(df2_clean)) {
+        stop("Time variable not found in one or both datasets")
+      }
+      
+      for (var in input$y_vars) {
+        if (!var %in% names(df1_clean) || !var %in% names(df2_clean)) {
+          stop(paste("Variable", var, "not found in one or both datasets"))
+        }
+      }
+      
+      # Handle time variable - parse and convert to relative seconds
+      time_col1 <- parse_time_column(df1_clean[[input$time_var]])
+      time_col2 <- parse_time_column(df2_clean[[input$time_var]])
+      
+      df1_clean$time_relative <- create_relative_time(time_col1)
+      df2_clean$time_relative <- create_relative_time(time_col2)
+      
+      # Clean Y variables (numeric values comma decimals to points)
+      for (var in input$y_vars) {
+        df1_clean[[var]] <- suppressWarnings(as.numeric(gsub(",", ".", df1_clean[[var]])))
+        df2_clean[[var]] <- suppressWarnings(as.numeric(gsub(",", ".", df2_clean[[var]])))
+      }
+      
+      list(df1 = df1_clean, df2 = df2_clean)
+    }, error = function(e) {
+      showNotification(paste("Error processing data:", e$message), type = "error")
+      return(NULL)
+    })
   })
   
   # Function to create plots for a given style (side-by-side vs combined)
   create_plots_wrapper <- function(plot_style) {
     req(safe_data(), input$time_var, input$y_vars, values$setup_confirmed)
-    create_plots(plot_style, safe_data(), input$time_var, input$y_vars, current_label1(), current_label2())
+    tryCatch({
+      create_plots(plot_style, safe_data(), input$time_var, input$y_vars, current_label1(), current_label2())
+    }, error = function(e) {
+      showNotification(paste("Error creating plots:", e$message), type = "error")
+      return(NULL)
+    })
   }
   
   plot_pairs <- reactive({
@@ -462,9 +495,11 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$generate_plots, {
-    req(plot_pairs())
-    values$plots_generated <- TRUE
-    showNotification("Plots generated successfully!", type = "message")
+    plots <- plot_pairs()
+    if (!is.null(plots)) {
+      values$plots_generated <- TRUE
+      showNotification("Plots generated successfully!", type = "message")
+    }
   })
   
   output$plot_panels <- renderUI({
@@ -504,15 +539,33 @@ server <- function(input, output, session) {
       for (i in seq_along(plots)) {
         local({
           idx <- i
-          output[[paste0("plot_combined_", idx)]] <- renderPlot({ plots[[idx]]$combined })
+          output[[paste0("plot_combined_", idx)]] <- renderPlot({ 
+            if (!is.null(plots[[idx]]$combined)) {
+              plots[[idx]]$combined 
+            } else {
+              ggplot() + theme_void() + labs(title = "Plot not available")
+            }
+          })
         })
       }
     } else {
       for (i in seq_along(plots)) {
         local({
           idx <- i
-          output[[paste0("plot_left_", idx)]] <- renderPlot({ plots[[idx]]$left })
-          output[[paste0("plot_right_", idx)]] <- renderPlot({ plots[[idx]]$right })
+          output[[paste0("plot_left_", idx)]] <- renderPlot({ 
+            if (!is.null(plots[[idx]]$left)) {
+              plots[[idx]]$left
+            } else {
+              ggplot() + theme_void() + labs(title = "Plot not available")
+            }
+          })
+          output[[paste0("plot_right_", idx)]] <- renderPlot({ 
+            if (!is.null(plots[[idx]]$right)) {
+              plots[[idx]]$right
+            } else {
+              ggplot() + theme_void() + labs(title = "Plot not available")
+            }
+          })
         })
       }
     }
@@ -544,17 +597,17 @@ server <- function(input, output, session) {
   outputOptions(output, "setup_confirmed", suspendWhenHidden = FALSE)
   outputOptions(output, "plots_available", suspendWhenHidden = FALSE)
   
-  # PDF download handler (existing)
+  # PDF download handler (existing with error handling)
   output$download_pdf <- downloadHandler(
     filename = function() paste0("csv_report_", Sys.Date(), ".pdf"),
     content = function(file) {
-      # Use the export plot style preference
-      export_plots <- create_plots(input$export_plot_style, safe_data(), input$time_var, input$y_vars, current_label1(), current_label2())
-      req(export_plots, values$plots_generated)
-      
-      temp_file <- tempfile(fileext = ".pdf")
-      
       tryCatch({
+        # Use the export plot style preference
+        export_plots <- create_plots(input$export_plot_style, safe_data(), input$time_var, input$y_vars, current_label1(), current_label2())
+        req(export_plots, values$plots_generated)
+        
+        temp_file <- tempfile(fileext = ".pdf")
+        
         # Open PDF device
         pdf(temp_file, width = input$pdf_width, height = input$pdf_height, onefile = TRUE)
         
@@ -602,37 +655,16 @@ server <- function(input, output, session) {
         # If PDF creation fails, try alternative approach 
         if (dev.cur() != 1) dev.off()  # Close any open devices
         
-        # Alternative method
-        pdf(temp_file, width = input$pdf_width, height = input$pdf_height, onefile = TRUE)
+        showNotification(paste("PDF generation error:", e$message), type = "error")
         
-        # Title page
-        par(mar = c(0, 0, 0, 0))
-        plot.new()
-        title(main = "CSV Comparison Report", cex.main = 2.5, line = -2)
-        mtext(paste("Generated:", Sys.Date()), side = 1, line = -8, cex = 1.4)
-        mtext(paste("Conditions:", current_label1(), "vs", current_label2()), side = 1, line = -6, cex = 1.6)
-        
-        # Plot each variable
-        for (i in seq_along(export_plots)) {
-          if (input$export_plot_style == "combined") {
-            print(export_plots[[i]]$combined)
-          } else {
-            gridExtra::grid.arrange(
-              export_plots[[i]]$left, 
-              export_plots[[i]]$right, 
-              ncol = 2,
-              top = paste("Variable:", input$y_vars[i]),
-              newpage = TRUE
-            )
-          }
-        }
-        
-        dev.off()
-        file.copy(temp_file, file, overwrite = TRUE)
+        # Create error file
+        error_file <- tempfile(fileext = ".txt")
+        writeLines(paste("Error generating PDF:", e$message), error_file)
+        file.copy(error_file, file, overwrite = TRUE)
         
       }, finally = {
         # Clean up temporary file
-        if (file.exists(temp_file)) {
+        if (exists("temp_file") && file.exists(temp_file)) {
           unlink(temp_file)
         }
       })
@@ -640,19 +672,19 @@ server <- function(input, output, session) {
     contentType = "application/pdf"
   )
   
-  # PNG download handler
+  # PNG download handler with error handling
   output$download_png <- downloadHandler(
     filename = function() paste0("CSV_plots_", Sys.Date(), ".zip"),
     content = function(file) {
-      # Use the export plot style preference
-      export_plots <- create_plots(input$export_plot_style, safe_data(), input$time_var, input$y_vars, current_label1(), current_label2())
-      req(export_plots, values$plots_generated)
-      
-      # Create temporary directory for PNG files
-      temp_dir <- tempdir()
-      png_files <- c()
-      
       tryCatch({
+        # Use the export plot style preference
+        export_plots <- create_plots(input$export_plot_style, safe_data(), input$time_var, input$y_vars, current_label1(), current_label2())
+        req(export_plots, values$plots_generated)
+        
+        # Create temporary directory for PNG files
+        temp_dir <- tempdir()
+        png_files <- c()
+        
         # Create PNG files for each variable
         for (i in seq_along(export_plots)) {
           var_name <- make.names(input$y_vars[i])  # Clean variable name for filename
