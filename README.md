@@ -17,3 +17,4 @@ This application concerns a tool to compare numeric time series data in CSV form
 * Developed for numeric data (categorical variable distribution currently unavailable)
 * Only positive numeric values will currently be plotted
 * Some date/time formats might not be recognized appropriately, so far it does however seem somewhat robust
+* Variable selection is artificially limited to four (constraint for web deployment)
