@@ -41,6 +41,32 @@ load_csv <- function(file) {
   return(df)
 }
 
+# Function to get all CSV files from www folder and create friendly names
+get_demo_files <- function() {
+  if (!dir.exists('www')) {
+    return(list())
+  }
+  
+  csv_files <- list.files(path= 'www',pattern ="\\.CSV$", full.names = FALSE)
+  
+  if (length(csv_files) == 0) {
+    return(list())
+  }
+  
+  # Create friendly names by removing prefixes and file extensions
+  friendly_names <- gsub("^demo_", "", csv_files)
+  friendly_names <- gsub("\\.csv$", "", friendly_names)
+  friendly_names <- gsub("_", " ", friendly_names)
+  friendly_names <- tools::toTitleCase(friendly_names)
+  
+  # Create named list for selectInput
+  demo_choices <- as.list(csv_files)
+  names(demo_choices) <- friendly_names
+  
+  return(demo_choices)
+}
+
+
 #' Parse time column with multiple format attempts and high precision
 #' 
 #' Attempts to parse time data using various datetime formats, preserving sub-second precision
@@ -112,12 +138,37 @@ create_relative_time <- function(time_col) {
 #' @return List with breaks and formatted labels
 create_time_axis <- function(time_values, n_breaks = 8) {
   time_range <- range(time_values, na.rm = TRUE)
-  breaks <- pretty(time_range, n = n_breaks)
+  max_time <- max(time_range)
+  
+  # Determine appropriate time unit based on total duration
+  if (max_time > 86400 * 4) { # More than 30 days
+    unit <- "days"
+    divisor <- 86400
+    label <- "Time (days)"
+  } else if (max_time > 4*3600) { # More than 1 hour
+    unit <- "hours"
+    divisor <- 3600
+    label <- "Time (hours)"
+  } else if (max_time > 4*60) { # More than 1 minute
+    unit <- "minutes"
+    divisor <- 60
+    label <- "Time (minutes)"
+  } else {
+    unit <- "seconds"
+    divisor <- 1
+    label <- "Time (seconds)"
+  }
+  
+  # Convert time values to appropriate unit
+  scaled_time <- time_values / divisor
+  breaks <- pretty(scaled_time, n = n_breaks)
   
   # Clean, simple labels - just round numbers
   labels <- round(breaks, 1)
   
-  return(list(breaks = breaks, labels = labels))
+  return(list(breaks = breaks * divisor,  # Return in original seconds
+              labels = labels,
+              unit_label = label))
 }
 
 #' Detect sampling interval from time series
@@ -232,7 +283,7 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
                   color="#FF7F50")+
         labs(title = paste0(var, " — ", label1, " vs ", label2), 
              subtitle = if(sampling_info != "") paste0(sampling_info) else NULL,
-             x = "Time (seconds)", 
+             x = time_axis$unit_label, 
              y = var) +
         scale_y_continuous(limits = y_limits) +
         scale_x_continuous(limits = x_limits, 
@@ -263,7 +314,7 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
                   color="#008080")+
         labs(title = paste0(var, " — ", label1), 
              subtitle = if(sampling_info != "") paste0(sampling_info) else NULL,
-             x = "Time (seconds)", 
+             x = time_axis$unit_label,
              y = var) +
         scale_y_continuous(limits = y_limits) +
         scale_x_continuous(limits = x_limits, 
@@ -287,7 +338,7 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
                                     color="#FF7F50")+
         labs(title = paste0(var, " — ", label2), 
              subtitle = if(sampling_info != "") paste0(sampling_info) else NULL,
-             x = "Time (seconds)", 
+             x = time_axis$unit_label,
              y = var) +
         scale_y_continuous(limits = y_limits) +
         scale_x_continuous(limits = x_limits, 
