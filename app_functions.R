@@ -1,6 +1,6 @@
 #' Load and clean CSV file
 #'
-#' Loads a CSV file, handles encoding issues, removes footer rows, deduplicates columns,
+#' Loads a CSV file, handles encoding issues, deduplicates columns,
 #' and converts "no"/"yes" values to 0/1
 #'
 #' @param file File input object from Shiny fileInput
@@ -304,13 +304,21 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
       combined_data$Condition <- factor(combined_data$Condition, levels = c(label1, label2))
       
       combined_plot <- ggplot(combined_data, aes(
-        x = time_x, y = value_y, color = Condition,
-        text = paste0(Condition, "\n", time_label, "\n", var, ": ", round(value_y, 2))
+        x = time_x, y = value_y, color = Condition
       )) +
-        geom_line(linewidth = 0.5, alpha = 0.8) +
-        geom_point(size = 0.8, alpha = 0.4) +
-        geom_hline(yintercept = avg1, color = color1, linetype = "dashed", alpha = 0.6, linewidth = 0.5) +
-        geom_hline(yintercept = avg2, color = color2, linetype = "dashed", alpha = 0.6, linewidth = 0.5) +
+        geom_line(linewidth = 0.5, alpha = 0.8)
+      
+      # text aes only for interactive plotly, not static export
+      if (for_export) {
+        combined_plot <- combined_plot +
+          geom_point(size = 0.8, alpha = 0.4)
+      } else {
+        combined_plot <- combined_plot +
+          geom_point(aes(text = paste0(Condition, "\n", time_label, "\n", var, ": ", round(value_y, 2))),
+                     size = 0.8, alpha = 0.4)
+      }
+      
+      combined_plot <- combined_plot +
         labs(
           title = paste0(var, " \u2014 ", label1, " vs ", label2),
           subtitle = if (sampling_info != "") sampling_info else NULL,
@@ -328,28 +336,31 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
           panel.background = element_rect(fill = export_bg, color = NA)
         )
       
-      # Add avg annotations for static export
+      # For static export: add hlines and labels directly to ggplot
       if (for_export) {
         closeness <- abs(avg1 - avg2) / (y_limits[2] - y_limits[1])
         vjust1 <- -0.8
         vjust2 <- if (closeness < 0.08) 1.8 else -0.8
         
         combined_plot <- combined_plot +
+          geom_hline(yintercept = avg1, color = color1, linetype = "dashed", alpha = 0.6, linewidth = 0.5) +
+          geom_hline(yintercept = avg2, color = color2, linetype = "dashed", alpha = 0.6, linewidth = 0.5) +
           annotate("label", x = x_max * 0.98, y = avg1,
-                   label = paste(label1, "avg:", round(avg1, 2)),
+                   label = round(avg1, 2),
                    vjust = vjust1, hjust = 1, color = color1, fill = "white",
-                   size = 3.5, fontface = "bold", label.size = 0.5
+                   size = 3.5, fontface = "bold", linewidth = 0.5
           ) +
           annotate("label", x = x_max * 0.98, y = avg2,
-                   label = paste(label2, "avg:", round(avg2, 2)),
+                   label = round(avg2, 2),
                    vjust = vjust2, hjust = 1, color = color2, fill = "white",
-                   size = 3.5, fontface = "bold", label.size = 0.5
+                   size = 3.5, fontface = "bold", linewidth = 0.5
           )
       }
       
       list(combined = combined_plot,
            avg1 = avg1, avg2 = avg2, color1 = color1, color2 = color2,
-           x_max = x_max, y_range = y_limits[2] - y_limits[1], label1 = label1, label2 = label2
+           x_min = x_min, x_max = x_max, y_range = y_limits[2] - y_limits[1],
+           label1 = label1, label2 = label2
       )
       
     } else {
@@ -357,11 +368,23 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
       d1$time_label <- format_time_label(d1[[time_var]], max_time)
       d2$time_label <- format_time_label(d2[[time_var]], max_time)
       
-      p1 <- ggplot(d1, aes(x = .data[["time_relative"]], y = .data[[var]],
-                           text = paste0(time_label, "\n", var, ": ", round(.data[[var]], 2))
-      )) +
-        geom_line(color = color1, linewidth = 0.5, alpha = 0.8) +
-        geom_point(color = color1, size = 0.8, alpha = 0.4) +
+      p1 <- ggplot(d1, aes(x = .data[["time_relative"]], y = .data[[var]])) +
+        geom_line(color = color1, linewidth = 0.5, alpha = 0.8)
+      
+      p2 <- ggplot(d2, aes(x = .data[["time_relative"]], y = .data[[var]])) +
+        geom_line(color = color2, linewidth = 0.5, alpha = 0.8)
+      
+      if (for_export) {
+        p1 <- p1 + geom_point(color = color1, size = 0.8, alpha = 0.4)
+        p2 <- p2 + geom_point(color = color2, size = 0.8, alpha = 0.4)
+      } else {
+        p1 <- p1 + geom_point(aes(text = paste0(time_label, "\n", var, ": ", round(.data[[var]], 2))),
+                              color = color1, size = 0.8, alpha = 0.4)
+        p2 <- p2 + geom_point(aes(text = paste0(time_label, "\n", var, ": ", round(.data[[var]], 2))),
+                              color = color2, size = 0.8, alpha = 0.4)
+      }
+      
+      p1 <- p1 +
         geom_hline(yintercept = avg1, color = color1, linetype = "dashed", alpha = 0.6, linewidth = 0.5) +
         labs(
           title = paste0(var, " \u2014 ", label1),
@@ -377,11 +400,7 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
           panel.background = element_rect(fill = export_bg, color = NA)
         )
       
-      p2 <- ggplot(d2, aes(x = .data[["time_relative"]], y = .data[[var]],
-                           text = paste0(time_label, "\n", var, ": ", round(.data[[var]], 2))
-      )) +
-        geom_line(color = color2, linewidth = 0.5, alpha = 0.8) +
-        geom_point(color = color2, size = 0.8, alpha = 0.4) +
+      p2 <- p2 +
         geom_hline(yintercept = avg2, color = color2, linetype = "dashed", alpha = 0.6, linewidth = 0.5) +
         labs(
           title = paste0(var, " \u2014 ", label2),
@@ -399,20 +418,20 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
       
       if (for_export) {
         p1 <- p1 + annotate("label", x = x_max * 0.98, y = avg1,
-                            label = paste("avg:", round(avg1, 2)),
+                            label = round(avg1, 2),
                             vjust = -0.8, hjust = 1, color = color1, fill = "white",
-                            size = 3.5, fontface = "bold", label.size = 0.5
+                            size = 3.5, fontface = "bold", linewidth = 0.5
         )
         p2 <- p2 + annotate("label", x = x_max * 0.98, y = avg2,
-                            label = paste("avg:", round(avg2, 2)),
+                            label = round(avg2, 2),
                             vjust = -0.8, hjust = 1, color = color2, fill = "white",
-                            size = 3.5, fontface = "bold", label.size = 0.5
+                            size = 3.5, fontface = "bold", linewidth = 0.5
         )
       }
       
       list(left = p1, right = p2,
            avg1 = avg1, avg2 = avg2, color1 = color1, color2 = color2,
-           x_max = x_max, y_range = y_limits[2] - y_limits[1]
+           x_min = x_min, x_max = x_max, y_range = y_limits[2] - y_limits[1]
       )
     }
   })
