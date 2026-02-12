@@ -36,6 +36,7 @@ ui <- page_sidebar(
       value = "upload",
       layout_columns(
         col_widths = c(7, 5),
+        min_height = "500px",
         
         # Left column: data source + file selection
         card(
@@ -364,7 +365,7 @@ server <- function(input, output, session) {
           })
         ),
         p(class = "text-muted fst-italic mb-0",
-          "Select any two files to compare their data."
+          "Select any two (similar) files to compare their data."
         )
       )
     }
@@ -604,20 +605,27 @@ server <- function(input, output, session) {
     do.call(navset_tab, tabs)
   })
   
-  # Helper: build a plotly avg annotation with background + border
-  make_avg_annotation <- function(avg, color, x_pos, yanchor = "bottom", label_prefix = "avg") {
-    list(
-      x = x_pos, y = avg,
-      text = paste0("<b>", label_prefix, ": ", round(avg, 2), "</b>"),
-      showarrow = FALSE,
-      xref = "x", yref = "y",
-      xanchor = "right", yanchor = yanchor,
-      font = list(color = color, size = 12),
-      bgcolor = "rgba(255,255,255,0.85)",
-      bordercolor = color,
-      borderwidth = 1.5,
-      borderpad = 4
-    )
+  # Helper: add avg line + label as plotly traces linked to a legendgroup
+  add_avg_trace <- function(fig, avg, color, label, x_min, x_max, y_offset, legendgroup) {
+    fig %>%
+      # Dashed avg line
+      plotly::add_segments(
+        x = x_min, xend = x_max, y = avg, yend = avg,
+        line = list(color = color, dash = "dash", width = 1.5),
+        opacity = 0.6,
+        legendgroup = legendgroup, showlegend = FALSE,
+        hoverinfo = "none", inherit = FALSE
+      ) %>%
+      # Text label
+      plotly::add_trace(
+        x = x_max * 0.98, y = avg + y_offset,
+        type = "scatter", mode = "text",
+        text = paste0("<b>", round(avg, 2), "</b>"),
+        textfont = list(color = color, size = 12),
+        textposition = "middle left",
+        legendgroup = legendgroup, showlegend = FALSE,
+        hoverinfo = "none", inherit = FALSE
+      )
   }
   
   # Render plotly outputs dynamically
@@ -632,20 +640,30 @@ server <- function(input, output, session) {
           output[[paste0("plotly_combined_", idx)]] <- renderPlotly({
             p <- plots[[idx]]
             if (!is.null(p$combined)) {
-              # Dodge: if averages are within 8% of y range, flip one below its line
-              closeness <- abs(p$avg1 - p$avg2) / p$y_range
-              anchor1 <- "bottom"
-              anchor2 <- if (closeness < 0.08) "top" else "bottom"
+              # Calculate label dodge offsets
+              dodge <- p$y_range * 0.03
+              if (abs(p$avg1 - p$avg2) < p$y_range * 0.08) {
+                # Too close — push apart
+                midpoint <- (p$avg1 + p$avg2) / 2
+                offset1 <- if (p$avg1 >= p$avg2) dodge else -dodge
+                offset2 <- if (p$avg2 > p$avg1) dodge else -dodge
+              } else {
+                offset1 <- dodge
+                offset2 <- dodge
+              }
               
-              luwi_ggplotly(p$combined, tooltip = "text") %>%
+              fig <- luwi_ggplotly(p$combined, tooltip = "text") %>%
                 plotly::layout(
                   legend = list(y = -0.15, orientation = "h", xanchor = "center", x = 0.5),
-                  margin = list(b = 80),
-                  annotations = list(
-                    make_avg_annotation(p$avg1, p$color1, p$x_max * 0.98, anchor1, p$label1),
-                    make_avg_annotation(p$avg2, p$color2, p$x_max * 0.98, anchor2, p$label2)
-                  )
+                  margin = list(b = 80)
                 )
+              
+              fig <- add_avg_trace(fig, p$avg1, p$color1, p$label1,
+                                   p$x_min, p$x_max, offset1, p$label1)
+              fig <- add_avg_trace(fig, p$avg2, p$color2, p$label2,
+                                   p$x_min, p$x_max, offset2, p$label2)
+              
+              fig
             }
           })
         })
@@ -657,23 +675,21 @@ server <- function(input, output, session) {
           output[[paste0("plotly_left_", idx)]] <- renderPlotly({
             p <- plots[[idx]]
             if (!is.null(p$left)) {
-              luwi_ggplotly(p$left, tooltip = "text") %>%
-                plotly::layout(
-                  annotations = list(
-                    make_avg_annotation(p$avg1, p$color1, p$x_max * 0.98)
-                  )
-                )
+              dodge <- p$y_range * 0.03
+              fig <- luwi_ggplotly(p$left, tooltip = "text")
+              fig <- add_avg_trace(fig, p$avg1, p$color1, "avg",
+                                   p$x_min, p$x_max, dodge, "avg1")
+              fig
             }
           })
           output[[paste0("plotly_right_", idx)]] <- renderPlotly({
             p <- plots[[idx]]
             if (!is.null(p$right)) {
-              luwi_ggplotly(p$right, tooltip = "text") %>%
-                plotly::layout(
-                  annotations = list(
-                    make_avg_annotation(p$avg2, p$color2, p$x_max * 0.98)
-                  )
-                )
+              dodge <- p$y_range * 0.03
+              fig <- luwi_ggplotly(p$right, tooltip = "text")
+              fig <- add_avg_trace(fig, p$avg2, p$color2, "avg",
+                                   p$x_min, p$x_max, dodge, "avg2")
+              fig
             }
           })
         })
@@ -719,22 +735,27 @@ server <- function(input, output, session) {
         req(export_plots, values$plots_generated)
         
         temp_file <- tempfile(fileext = ".pdf")
-        pdf(temp_file, width = input$pdf_width, height = input$pdf_height, onefile = TRUE)
+        pdf(temp_file, width = input$pdf_width, height = input$pdf_height, onefile = TRUE,
+            bg = luwitemplate::get_theme_colors()$body_bg)
         
-        # Title page
-        par(mar = c(0, 0, 0, 0))
+        # Title page with branded colors
+        theme_colors <- luwitemplate::get_theme_colors()
+        title_bg <- theme_colors$body_bg
+        title_fg <- theme_colors$body_color
+        
+        par(mar = c(0, 0, 0, 0), bg = title_bg)
         plot.new()
-        text(0.5, 0.8, "CSV Comparison Report", cex = 2.5, font = 2, adj = 0.5)
-        text(0.5, 0.65, paste("Generated on:", Sys.Date()), cex = 1.4, adj = 0.5)
+        text(0.5, 0.8, "CSV Comparison Report", cex = 2.5, font = 2, adj = 0.5, col = title_fg)
+        text(0.5, 0.65, paste("Generated on:", Sys.Date()), cex = 1.4, adj = 0.5, col = title_fg)
         text(0.5, 0.55, paste("Conditions:", current_label1(), "vs", current_label2()),
-             cex = 1.6, font = 2, adj = 0.5
+             cex = 1.6, font = 2, adj = 0.5, col = title_fg
         )
-        text(0.5, 0.45, paste("Variables compared:", length(input$y_vars)), cex = 1.2, adj = 0.5)
+        text(0.5, 0.45, paste("Variables compared:", length(input$y_vars)), cex = 1.2, adj = 0.5, col = title_fg)
         text(0.5, 0.35, paste("Plot style:",
                               if (input$export_plot_style == "combined") "Combined overlay" else "Side-by-side"
-        ), cex = 1, adj = 0.5)
+        ), cex = 1, adj = 0.5, col = title_fg)
         text(0.5, 0.25, paste("Variables:", paste(input$y_vars, collapse = ", ")),
-             cex = 1, adj = 0.5
+             cex = 1, adj = 0.5, col = title_fg
         )
         
         for (i in seq_along(export_plots)) {
@@ -772,6 +793,7 @@ server <- function(input, output, session) {
   output$download_png <- downloadHandler(
     filename = function() paste0("CSV_plots_", Sys.Date(), ".zip"),
     content = function(file) {
+      png_files <- c()
       tryCatch({
         export_plots <- create_plots(input$export_plot_style, safe_data(),
                                      input$time_var, input$y_vars, current_label1(), current_label2(),
@@ -780,14 +802,15 @@ server <- function(input, output, session) {
         req(export_plots, values$plots_generated)
         
         temp_dir <- tempdir()
-        png_files <- c()
+        export_bg <- luwitemplate::get_theme_colors()$body_bg
         
         for (i in seq_along(export_plots)) {
           var_name <- make.names(input$y_vars[i])
           
           if (input$export_plot_style == "combined") {
             png_file <- file.path(temp_dir, paste0(var_name, "_combined.png"))
-            png(png_file, width = input$png_width, height = input$png_height, res = input$png_dpi)
+            png(png_file, width = input$png_width, height = input$png_height, res = input$png_dpi,
+                bg = export_bg)
             print(export_plots[[i]]$combined)
             dev.off()
             png_files <- c(png_files, png_file)
@@ -795,11 +818,13 @@ server <- function(input, output, session) {
             png_file1 <- file.path(temp_dir, paste0(var_name, "_", make.names(current_label1()), ".png"))
             png_file2 <- file.path(temp_dir, paste0(var_name, "_", make.names(current_label2()), ".png"))
             
-            png(png_file1, width = input$png_width, height = input$png_height, res = input$png_dpi)
+            png(png_file1, width = input$png_width, height = input$png_height, res = input$png_dpi,
+                bg = export_bg)
             print(export_plots[[i]]$left)
             dev.off()
             
-            png(png_file2, width = input$png_width, height = input$png_height, res = input$png_dpi)
+            png(png_file2, width = input$png_width, height = input$png_height, res = input$png_dpi,
+                bg = export_bg)
             print(export_plots[[i]]$right)
             dev.off()
             
