@@ -227,6 +227,7 @@ detect_sampling_interval <- function(time_values) {
 #' Create plots for comparison using luwitemplate styling
 #'
 #' @param plot_style Character: "combined" or "separate"
+#' @param theme A bslib theme object from my_theme()
 #' @param safe_data List containing cleaned df1 and df2
 #' @param time_var Character: name of time variable
 #' @param y_vars Character vector: names of Y variables to plot
@@ -236,19 +237,20 @@ detect_sampling_interval <- function(time_values) {
 #'   for static PDF/PNG output. If FALSE, keeps transparent bg for plotly.
 #' @return List of plot objects
 
-create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2, for_export = FALSE) {
+create_plots <- function(plot_style, theme, safe_data, time_var, y_vars, label1, label2, for_export = FALSE) {
   time_var <- "time_relative"
   d1 <- safe_data$df1
   d2 <- safe_data$df2
   
   # Get brand colors for the two conditions
-  palette <- luwitemplate::scale_color_luwi_discrete(n = 2)
+  palette <- luwitemplate::scale_color_luwi_discrete(theme, n = 2)
   color1 <- palette[1]  # primary
   color2 <- palette[2]  # secondary
   
   # For export: use brand background instead of transparent
-  theme_colors <- luwitemplate::get_theme_colors()
+  theme_colors <- luwitemplate::get_theme_colors(theme)
   export_bg <- if (for_export) theme_colors$body_bg else "transparent"
+  label_fill <- theme_colors$body_bg  # annotation label background
   
   lapply(y_vars, function(var) {
     # Calculate shared axis limits
@@ -267,7 +269,9 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
     x_limits <- c(x_min, x_max)
     
     # Allow negative y values with 5% padding on both sides
-    y_pad <- (y_max - y_min) * 0.05
+    # Guard against constant-value columns where y_max == y_min
+    y_range_raw <- y_max - y_min
+    y_pad <- if (y_range_raw > 0) y_range_raw * 0.05 else abs(y_max) * 0.1 + 0.1
     y_limits <- c(y_min - y_pad, y_max + y_pad)
     
     all_time_vals <- c(x1_vals, x2_vals)
@@ -329,7 +333,7 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
         scale_y_continuous(limits = y_limits) +
         scale_x_continuous(limits = x_limits, breaks = time_axis$breaks, labels = time_axis$labels) +
         scale_color_manual(values = c(color1, color2)) +
-        luwitemplate::theme_luwi() +
+        luwitemplate::theme_luwi(theme) +
         theme(
           legend.title = element_blank(), legend.position = "bottom",
           plot.background = element_rect(fill = export_bg, color = NA),
@@ -338,21 +342,22 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
       
       # For static export: add hlines and labels directly to ggplot
       if (for_export) {
-        closeness <- abs(avg1 - avg2) / (y_limits[2] - y_limits[1])
+        y_span <- y_limits[2] - y_limits[1]
+        closeness <- if (y_span > 0) abs(avg1 - avg2) / y_span else 0
         vjust1 <- -0.8
-        vjust2 <- if (closeness < 0.08) 1.8 else -0.8
+        vjust2 <- if (isTRUE(closeness < 0.08)) 1.8 else -0.8
         
         combined_plot <- combined_plot +
           geom_hline(yintercept = avg1, color = color1, linetype = "dashed", alpha = 0.6, linewidth = 0.5) +
           geom_hline(yintercept = avg2, color = color2, linetype = "dashed", alpha = 0.6, linewidth = 0.5) +
           annotate("label", x = x_max * 0.98, y = avg1,
                    label = round(avg1, 2),
-                   vjust = vjust1, hjust = 1, color = color1, fill = "white",
+                   vjust = vjust1, hjust = 1, color = color1, fill = label_fill,
                    size = 3.5, fontface = "bold", linewidth = 0.5
           ) +
           annotate("label", x = x_max * 0.98, y = avg2,
                    label = round(avg2, 2),
-                   vjust = vjust2, hjust = 1, color = color2, fill = "white",
+                   vjust = vjust2, hjust = 1, color = color2, fill = label_fill,
                    size = 3.5, fontface = "bold", linewidth = 0.5
           )
       }
@@ -394,7 +399,7 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
         ) +
         scale_y_continuous(limits = y_limits) +
         scale_x_continuous(limits = x_limits, breaks = time_axis$breaks, labels = time_axis$labels) +
-        luwitemplate::theme_luwi() +
+        luwitemplate::theme_luwi(theme) +
         theme(
           plot.background = element_rect(fill = export_bg, color = NA),
           panel.background = element_rect(fill = export_bg, color = NA)
@@ -410,7 +415,7 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
         ) +
         scale_y_continuous(limits = y_limits) +
         scale_x_continuous(limits = x_limits, breaks = time_axis$breaks, labels = time_axis$labels) +
-        luwitemplate::theme_luwi() +
+        luwitemplate::theme_luwi(theme) +
         theme(
           plot.background = element_rect(fill = export_bg, color = NA),
           panel.background = element_rect(fill = export_bg, color = NA)
@@ -419,12 +424,12 @@ create_plots <- function(plot_style, safe_data, time_var, y_vars, label1, label2
       if (for_export) {
         p1 <- p1 + annotate("label", x = x_max * 0.98, y = avg1,
                             label = round(avg1, 2),
-                            vjust = -0.8, hjust = 1, color = color1, fill = "white",
+                            vjust = -0.8, hjust = 1, color = color1, fill = label_fill,
                             size = 3.5, fontface = "bold", linewidth = 0.5
         )
         p2 <- p2 + annotate("label", x = x_max * 0.98, y = avg2,
                             label = round(avg2, 2),
-                            vjust = -0.8, hjust = 1, color = color2, fill = "white",
+                            vjust = -0.8, hjust = 1, color = color2, fill = label_fill,
                             size = 3.5, fontface = "bold", linewidth = 0.5
         )
       }
