@@ -11,8 +11,13 @@ source("app_functions.R")
 
 # --- UI ---
 ui <- page_sidebar(
-  title = "CSV Comparison Tool",
+  title = tags$div(
+    class = "d-flex w-100 justify-content-between align-items-center",
+    span("CSV comparison tool", class = "navbar-brand"),
+    input_dark_mode(id = "dark_mode")
+  ),
   theme = my_theme(),
+  dark_mode_css(),
   
   # Vertical navigation sidebar
   
@@ -303,6 +308,8 @@ ui <- page_sidebar(
 # --- SERVER ---
 server <- function(input, output, session) {
   
+  dm <- use_dark_mode(input, session)
+  
   # Sync sidebar nav with main content
   observeEvent(input$sidebar_nav, {
     nav_select("main_content", selected = input$sidebar_nav)
@@ -554,11 +561,11 @@ server <- function(input, output, session) {
     })
   })
   
-  # Plot creation wrapper
+  # Plot creation wrapper — passes dm$theme()
   create_plots_wrapper <- function(plot_style) {
     req(safe_data(), input$time_var, input$y_vars, values$setup_confirmed)
     tryCatch({
-      create_plots(plot_style, safe_data(), input$time_var, input$y_vars,
+      create_plots(plot_style, dm$theme(), safe_data(), input$time_var, input$y_vars,
                    current_label1(), current_label2()
       )
     }, error = function(e) {
@@ -568,6 +575,8 @@ server <- function(input, output, session) {
   }
   
   plot_pairs <- reactive({
+    # Depend on dm$theme() so plots re-render on mode toggle
+    dm$theme()
     create_plots_wrapper(input$plot_style)
   })
   
@@ -628,7 +637,7 @@ server <- function(input, output, session) {
       )
   }
   
-  # Render plotly outputs dynamically
+  # Render plotly outputs — passes dm$theme() to luwi_ggplotly
   observe({
     plots <- plot_pairs()
     req(plots, values$plots_generated)
@@ -642,7 +651,7 @@ server <- function(input, output, session) {
             if (!is.null(p$combined)) {
               # Calculate label dodge offsets
               dodge <- p$y_range * 0.03
-              if (abs(p$avg1 - p$avg2) < p$y_range * 0.08) {
+              if (isTRUE(abs(p$avg1 - p$avg2) < p$y_range * 0.08)) {
                 # Too close — push apart
                 midpoint <- (p$avg1 + p$avg2) / 2
                 offset1 <- if (p$avg1 >= p$avg2) dodge else -dodge
@@ -652,7 +661,7 @@ server <- function(input, output, session) {
                 offset2 <- dodge
               }
               
-              fig <- luwi_ggplotly(p$combined, tooltip = "text") %>%
+              fig <- luwi_ggplotly(p$combined, theme = dm$theme(), tooltip = "text") %>%
                 plotly::layout(
                   legend = list(y = -0.15, orientation = "h", xanchor = "center", x = 0.5),
                   margin = list(b = 80)
@@ -676,7 +685,7 @@ server <- function(input, output, session) {
             p <- plots[[idx]]
             if (!is.null(p$left)) {
               dodge <- p$y_range * 0.03
-              fig <- luwi_ggplotly(p$left, tooltip = "text")
+              fig <- luwi_ggplotly(p$left, theme = dm$theme(), tooltip = "text")
               fig <- add_avg_trace(fig, p$avg1, p$color1, "avg",
                                    p$x_min, p$x_max, dodge, "avg1")
               fig
@@ -686,7 +695,7 @@ server <- function(input, output, session) {
             p <- plots[[idx]]
             if (!is.null(p$right)) {
               dodge <- p$y_range * 0.03
-              fig <- luwi_ggplotly(p$right, tooltip = "text")
+              fig <- luwi_ggplotly(p$right, theme = dm$theme(), tooltip = "text")
               fig <- add_avg_trace(fig, p$avg2, p$color2, "avg",
                                    p$x_min, p$x_max, dodge, "avg2")
               fig
@@ -723,23 +732,24 @@ server <- function(input, output, session) {
   outputOptions(output, "setup_confirmed", suspendWhenHidden = FALSE)
   outputOptions(output, "plots_available", suspendWhenHidden = FALSE)
   
-  # PDF download handler
+  # PDF download handler — passes dm$theme()
   output$download_pdf <- downloadHandler(
     filename = function() paste0("csv_report_", Sys.Date(), ".pdf"),
     content = function(file) {
       tryCatch({
-        export_plots <- create_plots(input$export_plot_style, safe_data(),
+        export_plots <- create_plots(input$export_plot_style, dm$theme(), safe_data(),
                                      input$time_var, input$y_vars, current_label1(), current_label2(),
                                      for_export = TRUE
         )
         req(export_plots, values$plots_generated)
         
+        theme_colors <- luwitemplate::get_theme_colors(dm$theme())
+        
         temp_file <- tempfile(fileext = ".pdf")
         pdf(temp_file, width = input$pdf_width, height = input$pdf_height, onefile = TRUE,
-            bg = luwitemplate::get_theme_colors()$body_bg)
+            bg = theme_colors$body_bg)
         
         # Title page with branded colors
-        theme_colors <- luwitemplate::get_theme_colors()
         title_bg <- theme_colors$body_bg
         title_fg <- theme_colors$body_color
         
@@ -789,20 +799,20 @@ server <- function(input, output, session) {
     contentType = "application/pdf"
   )
   
-  # PNG download handler
+  # PNG download handler — passes dm$theme()
   output$download_png <- downloadHandler(
     filename = function() paste0("CSV_plots_", Sys.Date(), ".zip"),
     content = function(file) {
       png_files <- c()
       tryCatch({
-        export_plots <- create_plots(input$export_plot_style, safe_data(),
+        export_plots <- create_plots(input$export_plot_style, dm$theme(), safe_data(),
                                      input$time_var, input$y_vars, current_label1(), current_label2(),
                                      for_export = TRUE
         )
         req(export_plots, values$plots_generated)
         
         temp_dir <- tempdir()
-        export_bg <- luwitemplate::get_theme_colors()$body_bg
+        export_bg <- luwitemplate::get_theme_colors(dm$theme())$body_bg
         
         for (i in seq_along(export_plots)) {
           var_name <- make.names(input$y_vars[i])
@@ -832,13 +842,35 @@ server <- function(input, output, session) {
           }
         }
         
-        zip_file <- tempfile(fileext = ".zip")
-        old_wd <- getwd()
-        setwd(temp_dir)
-        zip_filenames <- basename(png_files)
-        zip(zip_file, zip_filenames, flags = "-r9X")
-        setwd(old_wd)
-        file.copy(zip_file, file, overwrite = TRUE)
+        # Create ZIP — use full paths to avoid setwd in server process
+        zip_file <- file.path(temp_dir, paste0("csv_plots_", format(Sys.Date(), "%Y%m%d"), ".zip"))
+        
+        # Remove old zip if exists
+        if (file.exists(zip_file)) unlink(zip_file)
+        
+        # utils::zip with full paths and explicit zip binary check
+        zip_result <- tryCatch({
+          utils::zip(zip_file, files = png_files, flags = "-j")  # -j: junk paths (store filenames only)
+        }, warning = function(w) {
+          message("ZIP warning: ", w$message)
+          NULL
+        }, error = function(e) {
+          message("ZIP error: ", e$message)
+          NULL
+        })
+        
+        if (!is.null(zip_result) && file.exists(zip_file) && file.info(zip_file)$size > 0) {
+          file.copy(zip_file, file, overwrite = TRUE)
+        } else {
+          # Fallback: try system2 directly
+          zip_bin <- Sys.which("zip")
+          if (nzchar(zip_bin)) {
+            system2(zip_bin, args = c("-j", shQuote(zip_file), shQuote(png_files)))
+            file.copy(zip_file, file, overwrite = TRUE)
+          } else {
+            stop("zip utility not found. Install with: sudo apt install zip")
+          }
+        }
       }, error = function(e) {
         if (dev.cur() != 1) dev.off()
         error_file <- tempfile(fileext = ".txt")
