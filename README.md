@@ -28,5 +28,3 @@ Place any CSV files in the `www/` folder. The app auto-discovers them, strips `d
 ## Requirements
 
 `shiny`, `bslib`, `ggplot2`, `plotly`, `gridExtra`, `lubridate`, `luwitemplate`
-
-For PNG export on Linux: `sudo apt install zip`
