@@ -1,3 +1,9 @@
+options(
+  shinylive.repos = c(
+    "https://lukaswillocx.r-universe.dev",
+    "https://repo.r-wasm.org"
+  )
+)
 library(shiny)
 library(bslib)
 library(ggplot2)
