@@ -23,7 +23,7 @@ A Shiny app for visually comparing time-series data across two CSV files. Upload
 
 ## Demo Files
 
-Place any CSV files in the `www/` folder. The app auto-discovers them, strips `demo_` prefixes, and creates human-friendly labels. Select any two files with overlapping column names to compare.
+Place any CSV files in the `www/` folder. The app auto-discovers them, strips `demo_` prefixes, and creates human-friendly labels. Select any two files with overlapping column names to compare. There are currently two types of timeseries data in the `www/` folder. This includes weather data for four locations over a random 14 day time period and HWInfo64 data, showing computer system metrics and resource allocation. 
 
 ## Requirements
 
