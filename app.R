@@ -1,9 +1,3 @@
-options(
-  shinylive.repos = c(
-    "https://lukaswillocx.r-universe.dev",
-    "https://repo.r-wasm.org"
-  )
-)
 library(shiny)
 library(bslib)
 library(ggplot2)
@@ -24,6 +18,7 @@ ui <- page_sidebar(
   ),
   theme = my_theme(),
   dark_mode_css(),
+  window_title = 'CSV comparison tool',
   
   # Vertical navigation sidebar
   
